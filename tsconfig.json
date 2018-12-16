@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+        "module": "es2015",
+        "target": "es3",
+        "removeComments": true,
+        "moduleResolution": "node",
+        "sourceMap": true
+    }
+}
