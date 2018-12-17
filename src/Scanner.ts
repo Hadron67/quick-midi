@@ -11,9 +11,11 @@ const regDigit = /[0-9]/;
 
 class Scanner implements ITokenSource {
     pos: Position = new Position(1, 1);
+    _tk: Token = null;
     constructor(private _source: ISource){}
     reset(s: ISource = null){
         this.pos.reset();
+        this._tk = null;
         if (s !== null){
             this._source = s;
         }
@@ -39,6 +41,19 @@ class Scanner implements ITokenSource {
         return regName.test(c);
     }
     nextToken(): Token{
+        if (this._tk === null){
+            return this._scanToken();
+        }
+        else {
+            let tk = this._tk;
+            this._tk = null;
+            return tk;
+        }
+    }
+    peekToken(): Token{
+        return this._tk === null ? this._tk = this._scanToken() : this._tk;
+    }
+    private _scanToken(): Token{
         let c = this._next();
         let noWhiteSpace = false, hasWhiteSpace = false;
         do {

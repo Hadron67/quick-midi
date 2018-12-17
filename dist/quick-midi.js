@@ -105,20 +105,41 @@
         }
         TeXMacro.prototype.run = function (e) {
             var ret = [], param = new Array(this.argCount);
+            var t;
             for (var i = 0, _a = this.fmt; i < _a.length; i++) {
-                var f = _a[i], t = e.nextToken(false);
+                var f = _a[i];
                 if (f.type === TokenType.MACRO_PARAM) {
-                    param[f.val] = t.type === TokenType.BGROUP ? e.readGroup(t, false) : [t];
+                    var selectedParam = void 0;
+                    if (i === _a.length - 1) {
+                        selectedParam = param[f.val] = e.readPossibleGroup(e.nextToken(false), false);
+                    }
+                    else {
+                        var next = _a[i + 1];
+                        selectedParam = param[f.val] = [];
+                        t = e.peekToken(false);
+                        while (t.type !== TokenType.EOF && t.text !== next.text) {
+                            e.readPossibleGroup(e.nextToken(false), false, selectedParam);
+                            t = e.peekToken(false);
+                        }
+                    }
                 }
-                else if (f.text !== t.text) {
-                    e.eReporter.complationError("Use of macro " + this.name + " that doesn't match its definition", t);
+                else {
+                    t = e.nextToken(false);
+                    if (t.type === TokenType.EOF)
+                        e.eReporter.complationError("Unexpected end of file: use of macro " + this.name + " that doesn't match its definition", t);
+                    else if (f.text !== t.text) {
+                        e.eReporter.complationError("Use of macro " + this.name + " that doesn't match its definition", t);
+                    }
                 }
             }
             for (var _i = 0, _b = this.content; _i < _b.length; _i++) {
                 var tk = _b[_i];
                 if (tk.type === TokenType.MACRO_PARAM) {
-                    for (var _c = 0, _d = param[tk.val]; _c < _d.length; _c++) {
-                        var ptk = _d[_c];
+                    var selected = param[tk.val];
+                    if (selected.length >= 1)
+                        selected[0].hasWhiteSpace = tk.hasWhiteSpace;
+                    for (var _c = 0, selected_1 = selected; _c < selected_1.length; _c++) {
+                        var ptk = selected_1[_c];
                         ret.push(ptk);
                     }
                 }
@@ -182,7 +203,7 @@
                     e.eReporter.complationError('"{" expected', t);
                     return null;
                 }
-                macro.content = e.readGroup(t, false);
+                macro.content = e.readPossibleGroup(t, false);
                 cela.defineMacro(macro, global);
                 return null;
             }
@@ -197,11 +218,13 @@
             this.i = 0;
         }
         TokenArray.prototype.nextToken = function () { return this.i >= this.ta.length ? null : this.ta[this.i++]; };
+        TokenArray.prototype.peekToken = function () { return this.i >= this.ta.length ? null : this.ta[this.i]; };
         return TokenArray;
     }());
     var MacroExpander = (function () {
         function MacroExpander(reporter, tSource, macroSet) {
             this.maxNestedMacro = 100;
+            this._tk = null;
             this.processStack = [];
             this.eReporter = reporter;
             this.macros = macroSet === undefined ? new MacroSet() : macroSet;
@@ -209,6 +232,7 @@
         }
         MacroExpander.prototype.init = function () {
             this.processStack.length = 1;
+            this._tk = null;
         };
         MacroExpander.prototype._expand = function (tk) {
             var macro = this.macros.getMacro(tk.text);
@@ -235,24 +259,32 @@
             }
             return t;
         };
-        MacroExpander.prototype.readGroup = function (bg, expand) {
-            var ret = [bg];
+        MacroExpander.prototype.readPossibleGroup = function (bg, expand, array) {
+            var ret;
+            if (array === void 0)
+                ret = [bg];
+            else {
+                ret = array;
+                ret.push(bg);
+            }
             var level = 1;
-            while (level > 0) {
-                var t = this.nextToken(expand);
-                if (t.type === TokenType.EOF) {
-                    this.eReporter.complationError('missing "}"', t);
-                    level = 0;
-                }
-                else {
-                    ret.push(t);
-                    t.type === TokenType.BGROUP && level++;
-                    t.type === TokenType.EGROUP && level--;
+            if (bg.type === TokenType.BGROUP) {
+                while (level > 0) {
+                    var t = this.nextToken(expand);
+                    if (t.type === TokenType.EOF) {
+                        this.eReporter.complationError('missing "}"', t);
+                        level = 0;
+                    }
+                    else {
+                        ret.push(t);
+                        t.type === TokenType.BGROUP && level++;
+                        t.type === TokenType.EGROUP && level--;
+                    }
                 }
             }
             return ret;
         };
-        MacroExpander.prototype.nextToken = function (expand) {
+        MacroExpander.prototype._readToken = function (expand) {
             if (expand === void 0) { expand = true; }
             do {
                 var ret = this._pull();
@@ -278,6 +310,21 @@
                 }
             } while (true);
         };
+        MacroExpander.prototype.nextToken = function (expand) {
+            if (expand === void 0) { expand = true; }
+            if (this._tk === null) {
+                return this._readToken(expand);
+            }
+            else {
+                var tk = this._tk;
+                this._tk = null;
+                return tk;
+            }
+        };
+        MacroExpander.prototype.peekToken = function (expand) {
+            if (expand === void 0) { expand = true; }
+            return this._tk === null ? this._tk = this._readToken(expand) : this._tk;
+        };
         return MacroExpander;
     }());
 
@@ -288,7 +335,16 @@
         function Scanner(_source) {
             this._source = _source;
             this.pos = new Position(1, 1);
+            this._tk = null;
         }
+        Scanner.prototype.reset = function (s) {
+            if (s === void 0) { s = null; }
+            this.pos.reset();
+            this._tk = null;
+            if (s !== null) {
+                this._source = s;
+            }
+        };
         Scanner.prototype._next = function () {
             var c = this._source.next();
             if (c === '\r') {
@@ -309,6 +365,19 @@
             return regName.test(c);
         };
         Scanner.prototype.nextToken = function () {
+            if (this._tk === null) {
+                return this._scanToken();
+            }
+            else {
+                var tk = this._tk;
+                this._tk = null;
+                return tk;
+            }
+        };
+        Scanner.prototype.peekToken = function () {
+            return this._tk === null ? this._tk = this._scanToken() : this._tk;
+        };
+        Scanner.prototype._scanToken = function () {
             var c = this._next();
             var noWhiteSpace = false, hasWhiteSpace = false;
             do {
@@ -382,6 +451,9 @@
         function ErrorReporter() {
             this.msgs = [];
         }
+        ErrorReporter.prototype.reset = function () {
+            this.msgs.length = 0;
+        };
         ErrorReporter.prototype.complationError = function (msg, range) {
             this.msgs.push({ msg: msg, range: range });
         };

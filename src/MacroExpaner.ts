@@ -16,18 +16,39 @@ class TeXMacro implements Macro {
     }
     run(e: MacroExpander){
         let ret: Token[] = [], param: Token[][] = new Array(this.argCount);
+        let t: Token;
         for (let i = 0, _a = this.fmt; i < _a.length; i++){
-            let f = _a[i], t = e.nextToken(false);
+            let f = _a[i];
             if (f.type === TokenType.MACRO_PARAM){
-                param[f.val] = t.type === TokenType.BGROUP ? e.readGroup(t, false) : [t];
+                let selectedParam: Token[];
+                if (i === _a.length - 1){
+                    selectedParam = param[f.val] = e.readPossibleGroup(e.nextToken(false), false);
+                }
+                else {
+                    let next = _a[i + 1];
+                    selectedParam = param[f.val] = [];
+                    t = e.peekToken(false);
+                    while(t.type !== TokenType.EOF && t.text !== next.text){
+                        e.readPossibleGroup(e.nextToken(false), false, selectedParam);
+                        t = e.peekToken(false);
+                    }
+                }
             }
-            else if (f.text !== t.text){
-                e.eReporter.complationError(`Use of macro ${this.name} that doesn't match its definition`, t);
+            else {
+                t = e.nextToken(false);
+                if (t.type === TokenType.EOF)
+                    e.eReporter.complationError(`Unexpected end of file: use of macro ${this.name} that doesn't match its definition`, t);
+                else if (f.text !== t.text){
+                    e.eReporter.complationError(`Use of macro ${this.name} that doesn't match its definition`, t);
+                }
             }
         }
         for (let tk of this.content){
             if (tk.type === TokenType.MACRO_PARAM){
-                for (let ptk of param[tk.val]){
+                let selected = param[tk.val];
+                if (selected.length >= 1)
+                    selected[0].hasWhiteSpace = tk.hasWhiteSpace;
+                for (let ptk of selected){
                     ret.push(ptk);
                 }
             }
@@ -87,7 +108,7 @@ class MacroSet {
                 e.eReporter.complationError('"{" expected', t);
                 return null;
             }
-            macro.content = e.readGroup(t, false);
+            macro.content = e.readPossibleGroup(t, false);
             cela.defineMacro(macro, global);
             return null;
         }
@@ -100,6 +121,7 @@ class TokenArray implements ITokenSource {
     i = 0;
     constructor(public ta: Token[]){}
     nextToken(){ return this.i >= this.ta.length ? null : this.ta[this.i++]; }
+    peekToken(){ return this.i >= this.ta.length ? null : this.ta[this.i]; }
 }
 
 /**
@@ -110,6 +132,7 @@ class MacroExpander implements ITokenSource {
     macros: MacroSet;
     eReporter: ErrorReporter;
     maxNestedMacro: number = 100;
+    private _tk: Token = null;;
 
     processStack: ITokenSource[] = [];
 
@@ -120,6 +143,7 @@ class MacroExpander implements ITokenSource {
     }
     init(){
         this.processStack.length = 1;
+        this._tk = null;
     }
     // token must be cosumed first
     private _expand(tk: Token){
@@ -148,24 +172,32 @@ class MacroExpander implements ITokenSource {
         }
         return t;
     }
-    readGroup(bg: Token, expand: boolean): Token[]{
-        let ret: Token[] = [bg];
+    readPossibleGroup(bg: Token, expand: boolean, array?: Token[]): Token[]{
+        let ret: Token[];
+        if (array === void 0)
+            ret = [bg];
+        else {
+            ret = array;
+            ret.push(bg);
+        }
         let level = 1;
-        while (level > 0){
-            let t = this.nextToken(expand);
-            if (t.type === TokenType.EOF){
-                this.eReporter.complationError('missing "}"', t);
-                level = 0;
-            }
-            else {
-                ret.push(t);
-                t.type === TokenType.BGROUP && level++;
-                t.type === TokenType.EGROUP && level--;
+        if (bg.type === TokenType.BGROUP){
+            while (level > 0){
+                let t = this.nextToken(expand);
+                if (t.type === TokenType.EOF){
+                    this.eReporter.complationError('missing "}"', t);
+                    level = 0;
+                }
+                else {
+                    ret.push(t);
+                    t.type === TokenType.BGROUP && level++;
+                    t.type === TokenType.EGROUP && level--;
+                }
             }
         }
         return ret;
     }
-    nextToken(expand: boolean = true): Token{
+    private _readToken(expand: boolean = true): Token{
         do {
             let ret = this._pull();
             if (expand && ret.type === TokenType.MACRO){
@@ -189,6 +221,19 @@ class MacroExpander implements ITokenSource {
                 return ret;
             }
         } while(true);
+    }
+    nextToken(expand: boolean = true): Token{
+        if (this._tk === null){
+            return this._readToken(expand);
+        }
+        else {
+            let tk = this._tk;
+            this._tk = null;
+            return tk;
+        }
+    }
+    peekToken(expand: boolean = true): Token{
+        return this._tk === null ? this._tk = this._readToken(expand) : this._tk;
     }
 }
 

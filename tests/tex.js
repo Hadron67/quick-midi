@@ -1,5 +1,5 @@
 var main = require("../index");
-var s = '\\def\\hkm{\\rfnj, hkm} \\def\\rfnj{222} { \\def\\rfnj{111} \\hkm } \\hkm', i = 0;
+var s = '\\def\\hkm #1 + #2. { #1 plus #2 \\soor } \\def\\soor{rfnj}\\hkm 9+85.', i = 0;
 
 var scanner = new main.Scanner({
     next: () => i >= s.length ? null : s.charAt(i++),

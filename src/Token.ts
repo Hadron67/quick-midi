@@ -53,6 +53,7 @@ class Token extends Range {
 
 interface ITokenSource {
     nextToken(): Token;
+    peekToken(): Token;
 }
 
 export { Token, Position, Range, TokenType, ITokenSource }
