@@ -100,6 +100,7 @@
             this.nameToken = nameToken;
             this.fmt = [];
             this.content = null;
+            this.isMeta = false;
             this.argCount = 0;
             this.name = nameToken.text;
         }
@@ -164,16 +165,25 @@
         MacroSet.prototype.defineMacro = function (m, global) {
             if (global === void 0) { global = false; }
             this.macroStack[global ? 0 : (this.macroStack.length - 1)][m.name] = m;
+            return this;
         };
         MacroSet.prototype.define = function (name, run, global) {
             if (global === void 0) { global = false; }
-            this.defineMacro({ name: name, run: run }, global);
+            this.defineMacro({ name: name, run: run, isMeta: false }, global);
+            return this;
+        };
+        MacroSet.prototype.defineMeta = function (name, global) {
+            if (global === void 0) { global = false; }
+            this.defineMacro({ name: name, run: null, isMeta: true }, global);
+            return this;
         };
         MacroSet.prototype.enterScope = function () {
             this.macroStack.push({});
+            return this;
         };
         MacroSet.prototype.leaveScope = function () {
             this.macroStack.pop();
+            return this;
         };
         MacroSet.prototype.isGlobal = function () {
             return this.macroStack.length === 0;
@@ -209,6 +219,7 @@
             }
             this.define('\\def', function (e) { return def(e, false); });
             this.define('\\gdef', function (e) { return def(e, true); });
+            return this;
         };
         return MacroSet;
     }());
@@ -227,15 +238,15 @@
             this._tk = null;
             this.processStack = [];
             this.eReporter = reporter;
-            this.macros = macroSet === undefined ? new MacroSet() : macroSet;
-            this.processStack = [tSource];
+            this.macros = macroSet === void 0 ? new MacroSet() : macroSet;
+            this.processStack = tSource ? [tSource] : [];
         }
-        MacroExpander.prototype.init = function () {
-            this.processStack.length = 1;
+        MacroExpander.prototype.init = function (ts) {
+            this.processStack.length = 0;
             this._tk = null;
+            this.processStack.push(ts);
         };
-        MacroExpander.prototype._expand = function (tk) {
-            var macro = this.macros.getMacro(tk.text);
+        MacroExpander.prototype._expand = function (tk, macro) {
             if (macro === null) {
                 this.eReporter.complationError("Undefined control sequence " + tk.text, tk);
                 return;
@@ -289,8 +300,13 @@
             do {
                 var ret = this._pull();
                 if (expand && ret.type === TokenType.MACRO) {
-                    this._expand(ret);
-                    continue;
+                    var macro = this.macros.getMacro(ret.text);
+                    if (macro === null || !macro.isMeta) {
+                        this._expand(ret, macro);
+                        continue;
+                    }
+                    else
+                        return ret;
                 }
                 else {
                     if (ret.type === TokenType.BGROUP) {
@@ -329,13 +345,18 @@
     }());
 
     var regWhiteSpace = /[ \t\r\n]/;
-    var regName = /[a-zA-Z0-9$_]/;
+    var regName = /[a-zA-Z0-9$]/;
     var regDigit = /[0-9]/;
     var Scanner = (function () {
         function Scanner(_source) {
             this._source = _source;
             this.pos = new Position(1, 1);
             this._tk = null;
+            this.macroChar = '\\';
+            this.macroParamChar = '#';
+            this.bgroupChar = '{';
+            this.egroupChar = '}';
+            this.commentChar = '%';
         }
         Scanner.prototype.reset = function (s) {
             if (s === void 0) { s = null; }
@@ -388,7 +409,7 @@
                         c = this._next();
                     }
                 }
-                else if (c === '%') {
+                else if (c === this.commentChar) {
                     this._consume(c);
                     c = this._next();
                     hasWhiteSpace = true;
@@ -404,10 +425,10 @@
             if (c === null) {
                 return new Token(TokenType.EOF, null, cur, this.pos.clone(), hasWhiteSpace);
             }
-            if (c === '\\') {
+            if (c === this.macroChar) {
                 this._consume(c);
                 if (this._isLetter(this._source.peek())) {
-                    var name_1 = '\\' + this._source.next();
+                    var name_1 = this.macroChar + this._source.next();
                     this._consume(c);
                     while (this._isLetter(c = this._source.peek()) && c !== null) {
                         this._consume(c);
@@ -419,7 +440,7 @@
                     return new Token(TokenType.OTHER, c, cur, this.pos.clone(), hasWhiteSpace);
                 }
             }
-            else if (c === '#') {
+            else if (c === this.macroParamChar) {
                 this._consume(c);
                 if (regDigit.test(this._source.peek())) {
                     c = this._source.next();
@@ -432,14 +453,15 @@
             else {
                 this._consume(c);
                 var type = void 0;
-                switch (c.charAt(0)) {
-                    case '{':
-                        type = TokenType.BGROUP;
-                        break;
-                    case '}':
-                        type = TokenType.EGROUP;
-                        break;
-                    default: type = TokenType.OTHER;
+                var ch = c.charAt(0);
+                if (c === this.bgroupChar) {
+                    type = TokenType.BGROUP;
+                }
+                else if (c === this.egroupChar) {
+                    type = TokenType.EGROUP;
+                }
+                else {
+                    type = TokenType.OTHER;
                 }
                 return new Token(type, c, cur, this.pos.clone(), hasWhiteSpace);
             }
@@ -460,9 +482,228 @@
         return ErrorReporter;
     }());
 
+    var toneName = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    var toneNum = ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
+    var numToNote = [0, 2, 4, 5, 7, 9, 11];
+    var Note = (function () {
+        function Note(note) {
+            this.note = note;
+            this.duration = 16;
+            this.delta = 0;
+            this.velocity = 0;
+        }
+        Note.prototype.toString = function (useNum) {
+            if (useNum === void 0) { useNum = false; }
+            var n = useNum ? toneNum : toneName;
+            return "< " + n[Note.getTone(this.note)] + ", " + this.duration + " >";
+        };
+        Note.getTone = function (note) { return note % 12; };
+        Note.getOctave = function (note) { return (note / 12 | 0) - 1; };
+        Note.numberToNote = function (n, octave) { return n === 0 ? 132 : numToNote[n] + 12 * (octave + 1); };
+        return Note;
+    }());
+
+    var NodeType;
+    (function (NodeType) {
+        NodeType[NodeType["NONE"] = 0] = "NONE";
+        NodeType[NodeType["DASH"] = 1] = "DASH";
+        NodeType[NodeType["UNDERLINE"] = 2] = "UNDERLINE";
+        NodeType[NodeType["SHARP"] = 3] = "SHARP";
+        NodeType[NodeType["FLAT"] = 4] = "FLAT";
+        NodeType[NodeType["DOT"] = 5] = "DOT";
+        NodeType[NodeType["POS_OCTAVE"] = 6] = "POS_OCTAVE";
+        NodeType[NodeType["NEG_OCTAVE"] = 7] = "NEG_OCTAVE";
+    })(NodeType || (NodeType = {}));
+    var modifierToType = {
+        '_': NodeType.UNDERLINE,
+        '-': NodeType.DASH,
+        '#': NodeType.SHARP,
+        'b': NodeType.FLAT,
+        '.': NodeType.NEG_OCTAVE,
+        '\'': NodeType.POS_OCTAVE,
+        '*': NodeType.DOT
+    };
+    var nodeTypeToLiteral = ['', '-', '_', '#', 'b', '*', '\'', '.'];
+    function createNoteNode(note, pos) {
+        return { next: null, sibling: null, parent: null, note: note, pos: pos };
+    }
+    function createNode(type, pos) {
+        if (pos === void 0) { pos = null; }
+        return { parent: null, type: type, pos: pos };
+    }
+    var NoteNodeList = (function () {
+        function NoteNodeList() {
+            this.head = null;
+            this.tail = null;
+            this.sibling = null;
+            this.topNode = null;
+        }
+        NoteNodeList.prototype._copyFrom = function (list) {
+            this.head = list.head;
+            this.tail = list.tail;
+            this.sibling = list.sibling;
+            this.topNode = list.topNode;
+        };
+        NoteNodeList.prototype.append = function (node) {
+            if (this.head) {
+                this.tail.next = node;
+                this.tail = node;
+            }
+            else {
+                this.sibling = this.head = this.tail = node;
+                this.topNode = createNode(NodeType.NONE);
+            }
+            var top = node.parent = this.topNode;
+            var cur = null;
+            return {
+                insertNode: function (n) {
+                    n.parent = top;
+                    if (cur) {
+                        cur.parent = n;
+                    }
+                    else {
+                        node.parent = n;
+                    }
+                    cur = n;
+                }
+            };
+        };
+        NoteNodeList.prototype.appendChild = function (list) {
+            if (list.head) {
+                if (this.head) {
+                    this.sibling.sibling = list.head;
+                    this.sibling = list.sibling;
+                    list.topNode.parent = this.topNode;
+                }
+                else
+                    this._copyFrom(list);
+            }
+        };
+        NoteNodeList.prototype.concat = function (list) {
+            if (list.head) {
+                if (this.head) {
+                    this.tail.next = list.head;
+                    this.tail = list.tail;
+                    list.topNode.parent = this.topNode;
+                }
+                else
+                    this._copyFrom(list);
+            }
+        };
+        NoteNodeList.prototype.getNodeSlot = function () {
+            var cela = this;
+            return {
+                insertNode: function (node) {
+                    if (cela.head) {
+                        var top_1 = cela.topNode;
+                        node.parent = top_1.parent;
+                        top_1.parent = node;
+                        cela.topNode = node;
+                    }
+                }
+            };
+        };
+        return NoteNodeList;
+    }());
+    var regNum = /[0-9]/;
+    function createParser(eReporter) {
+        var macroExpander = new MacroExpander(eReporter);
+        var defaultOctave = 4;
+        macroExpander.macros
+            .defineInternalMacros()
+            .defineMeta('\\tri');
+        return {
+            parse: parse
+        };
+        function next() {
+            return macroExpander.nextToken();
+        }
+        function peek() {
+            return macroExpander.peekToken();
+        }
+        function parse(tkSource) {
+            macroExpander.init(tkSource);
+            return parseSequence();
+        }
+        function parseGroup() {
+            next();
+            var list = parseSequence();
+            var tk = peek();
+            while (tk.type !== TokenType.EOF && tk.text === '|') {
+                next();
+                list.appendChild(parseSequence());
+                tk = peek();
+            }
+            if (next().type !== TokenType.EGROUP) {
+                eReporter.complationError("'}' expected", tk);
+            }
+            return list;
+        }
+        function parseSequence() {
+            var tk = peek();
+            var list = new NoteNodeList();
+            while (tk.type !== TokenType.EOF && tk.type !== TokenType.EGROUP && tk.text !== '|') {
+                var slot = null;
+                if (tk.type === TokenType.BGROUP) {
+                    var group = parseGroup();
+                    slot = group.getNodeSlot();
+                    list.concat(group);
+                }
+                else {
+                    slot = list.append(parseNote(tk));
+                }
+                parseNoteModifiers(slot);
+                tk = peek();
+            }
+            return list;
+        }
+        function parseNote(tk) {
+            if (regNum.test(tk.text)) {
+                next();
+                var n = Number(tk.text);
+                if (n >= 0 && n <= 7) {
+                    return createNoteNode(Note.numberToNote(n, defaultOctave), tk);
+                }
+                else {
+                    eReporter.complationError("Unknown note \"" + n + "\", valid notes are 0-7", tk);
+                    return createNoteNode(-1, tk);
+                }
+            }
+            else {
+                next();
+                eReporter.complationError('Note expected', tk);
+                return createNoteNode(-1, tk);
+            }
+        }
+        function parseNoteModifiers(slot) {
+            var tk = peek();
+            while (tk.type === TokenType.OTHER && tk.text !== '|' && modifierToType.hasOwnProperty(tk.text)) {
+                slot.insertNode(createNode(modifierToType[tk.text], tk));
+                next();
+                tk = peek();
+            }
+        }
+    }
+    function getModifiers(note) {
+        var s = '';
+        for (var n = note.parent; n; n = n.parent) {
+            s += nodeTypeToLiteral[n.type];
+        }
+        return s;
+    }
+    function dumpNoteList(list) {
+        var s = '';
+        for (var node = list.head; node; node = node.next) {
+            s += node.note + getModifiers(node) + ' ';
+        }
+        return [s];
+    }
+
     exports.MacroExpander = MacroExpander;
     exports.Scanner = Scanner;
     exports.ErrorReporter = ErrorReporter;
+    exports.createParser = createParser;
+    exports.dumpNoteList = dumpNoteList;
 
     Object.defineProperty(exports, '__esModule', { value: true });
 

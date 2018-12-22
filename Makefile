@@ -7,6 +7,6 @@ clean:
 	$(RM) dist/*
 
 sandwitch:
-	@[ `whoami` = "root" ] && echo "Okay." || echo "What? Make it yourself."
+	@[ "`whoami`" = "root" ] && echo "Okay." || echo "What? Make it yourself."
 
 .PHONY: clean sandwitch

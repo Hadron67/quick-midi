@@ -3,6 +3,7 @@ import { ErrorReporter } from './ErrorReporter';
 
 interface Macro {
     name: string;
+    isMeta: boolean;
     run(e: MacroExpander): ITokenSource;
 }
 
@@ -10,6 +11,7 @@ class TeXMacro implements Macro {
     name: string;
     fmt: Token[] = [];
     content: Token[] = null;
+    isMeta = false;
     argCount: number = 0;
     constructor(public nameToken: Token){
         this.name = nameToken.text;
@@ -70,15 +72,23 @@ class MacroSet {
     }
     defineMacro(m: Macro, global: boolean = false){
         this.macroStack[global ? 0 : (this.macroStack.length - 1)][m.name] = m;
+        return this;
     }
     define(name: string, run: (e: MacroExpander) => ITokenSource, global: boolean = false){
-        this.defineMacro({name, run}, global);
+        this.defineMacro({name, run, isMeta: false}, global);
+        return this;
+    }
+    defineMeta(name: string, global: boolean = false){
+        this.defineMacro({name, run: null, isMeta: true}, global);
+        return this;
     }
     enterScope(){
         this.macroStack.push({});
+        return this;
     }
     leaveScope(){
         this.macroStack.pop();
+        return this;
     }
     isGlobal(){
         return this.macroStack.length === 0;
@@ -114,6 +124,7 @@ class MacroSet {
         }
         this.define('\\def', e => def(e, false));
         this.define('\\gdef', e => def(e, true));
+        return this;
     }
 }
 
@@ -132,22 +143,22 @@ class MacroExpander implements ITokenSource {
     macros: MacroSet;
     eReporter: ErrorReporter;
     maxNestedMacro: number = 100;
-    private _tk: Token = null;;
+    private _tk: Token = null;
 
     processStack: ITokenSource[] = [];
 
-    constructor(reporter: ErrorReporter, tSource: ITokenSource, macroSet?: MacroSet){
+    constructor(reporter: ErrorReporter, tSource?: ITokenSource, macroSet?: MacroSet){
         this.eReporter = reporter;
-        this.macros = macroSet === undefined ? new MacroSet() : macroSet;
-        this.processStack = [tSource];
+        this.macros = macroSet === void 0 ? new MacroSet() : macroSet;
+        this.processStack = tSource ? [tSource] : [];
     }
-    init(){
-        this.processStack.length = 1;
+    init(ts: ITokenSource){
+        this.processStack.length = 0;
         this._tk = null;
+        this.processStack.push(ts);
     }
     // token must be cosumed first
-    private _expand(tk: Token){
-        let macro = this.macros.getMacro(tk.text);
+    private _expand(tk: Token, macro: Macro){
         if (macro === null){
             this.eReporter.complationError(`Undefined control sequence ${tk.text}`, tk);
             return;
@@ -201,8 +212,13 @@ class MacroExpander implements ITokenSource {
         do {
             let ret = this._pull();
             if (expand && ret.type === TokenType.MACRO){
-                this._expand(ret);
-                continue;
+                let macro = this.macros.getMacro(ret.text);
+                if (macro === null || !macro.isMeta){
+                    this._expand(ret, macro);
+                    continue;
+                }
+                else
+                    return ret;
             }
             else {
                 if (ret.type === TokenType.BGROUP){

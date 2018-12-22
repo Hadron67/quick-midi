@@ -29,9 +29,12 @@
 */
 const toneName = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const toneNum =  ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
+const numToNote = [0, 2, 4, 5, 7, 9, 11];
 
 class Note {
     duration: number = 16;
+    delta: number = 0;
+    velocity: number = 0; // not used at present
     constructor(public note: number){}
     toString(useNum: boolean = false){
         let note = '';
@@ -40,15 +43,21 @@ class Note {
     }
     static getTone(note: number){ return note % 12; }
     static getOctave(note: number){ return (note / 12 | 0) - 1; }
+    static numberToNote(n: number, octave: number){ return n === 0 ? 132 : numToNote[n] + 12 * (octave + 1); }
 }
 
 interface Event {
-    notes: Note[];
-    gap: number;// time gap to the previous event, in units of 64th note
+    notes: Note;
+    time: number;
 };
 
 class Channel {
-
+    instrument: string = '';
+    events: Event[] = [];
 };
 
-export { Note }
+class Midi {
+    channels: Channel[] = [];
+};
+
+export { Note, Event, Channel, Midi }

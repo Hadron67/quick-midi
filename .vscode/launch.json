@@ -7,6 +7,12 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "parse.js",
+            "program": "${workspaceFolder}/tests/parse.js"
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "tex.js",
             "program": "${workspaceFolder}/tests/tex.js",
             "outFiles": [

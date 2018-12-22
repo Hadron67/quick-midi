@@ -6,12 +6,20 @@ interface ISource {
 }
 
 const regWhiteSpace = /[ \t\r\n]/;
-const regName = /[a-zA-Z0-9$_]/;
+const regName = /[a-zA-Z0-9$]/;
 const regDigit = /[0-9]/;
 
 class Scanner implements ITokenSource {
     pos: Position = new Position(1, 1);
     _tk: Token = null;
+
+    // might be replaced by catcode in the future
+    macroChar = '\\';
+    macroParamChar = '#';
+    bgroupChar = '{';
+    egroupChar = '}';
+    commentChar = '%';
+
     constructor(private _source: ISource){}
     reset(s: ISource = null){
         this.pos.reset();
@@ -64,7 +72,7 @@ class Scanner implements ITokenSource {
                     c = this._next();
                 }
             }
-            else if (c === '%'){
+            else if (c === this.commentChar){
                 this._consume(c);
                 c = this._next();
                 hasWhiteSpace = true;
@@ -81,10 +89,10 @@ class Scanner implements ITokenSource {
         if (c === null){
             return new Token(TokenType.EOF, null, cur, this.pos.clone(), hasWhiteSpace);
         }
-        if (c === '\\'){
+        if (c === this.macroChar){
             this._consume(c);
             if (this._isLetter(this._source.peek())){
-                let name = '\\' + this._source.next();
+                let name = this.macroChar + this._source.next();
                 this._consume(c);
                 while(this._isLetter(c = this._source.peek()) && c !== null){
                     this._consume(c);
@@ -96,7 +104,7 @@ class Scanner implements ITokenSource {
                 return new Token(TokenType.OTHER, c, cur, this.pos.clone(), hasWhiteSpace);
             }
         }
-        else if (c === '#'){
+        else if (c === this.macroParamChar){
             this._consume(c);
             if (regDigit.test(this._source.peek())){
                 c = this._source.next();
@@ -109,10 +117,15 @@ class Scanner implements ITokenSource {
         else {
             this._consume(c);
             let type: TokenType;
-            switch (c.charAt(0)){
-                case '{': type = TokenType.BGROUP; break;
-                case '}': type = TokenType.EGROUP; break;
-                default: type = TokenType.OTHER;
+            let ch = c.charAt(0);
+            if (c === this.bgroupChar){
+                type = TokenType.BGROUP;
+            }
+            else if (c === this.egroupChar){
+                type = TokenType.EGROUP;
+            }
+            else {
+                type = TokenType.OTHER;
             }
             return new Token(type, c, cur, this.pos.clone(), hasWhiteSpace);
         }
