@@ -65,6 +65,9 @@
         Range.here = function (h) {
             return new Range(h, new Position(h.line, h.column + 1));
         };
+        Range.between = function (p1, p2) {
+            return new Range(p1.start, p2.end);
+        };
         return Range;
     }());
     var TokenType;
@@ -488,24 +491,86 @@
     var Note = (function () {
         function Note(note) {
             this.note = note;
-            this.duration = 16;
-            this.delta = 0;
+            this.duration = 32;
             this.velocity = 0;
         }
         Note.prototype.toString = function (useNum) {
             if (useNum === void 0) { useNum = false; }
             var n = useNum ? toneNum : toneName;
-            return "< " + n[Note.getTone(this.note)] + ", " + this.duration + " >";
+            return "< " + n[Note.getTone(this.note)] + " " + Note.getOctave(this.note) + ", " + this.duration + " >";
+        };
+        Note.prototype.normalize = function () {
+            if (this.note < 0) {
+                this.note = 0;
+            }
+            if (this.note > 132) {
+                this.note = 131;
+            }
+            this.duration = Math.round(this.duration) | 0;
+            if (this.duration === 0) {
+                this.duration = 1;
+            }
+            return this;
+        };
+        Note.prototype.shiftOctave = function (n) {
+            if (!this.isRest())
+                this.note += n * 12;
+        };
+        Note.prototype.shift = function (n) {
+            if (!this.isRest())
+                this.note += n;
+        };
+        Note.prototype.isRest = function () {
+            return this.note === 132;
+        };
+        Note.prototype.toEvent = function (delta, channel) {
+            return { delta: delta, channel: channel, velocity: this.velocity, note: this.note, duration: this.duration };
         };
         Note.getTone = function (note) { return note % 12; };
         Note.getOctave = function (note) { return (note / 12 | 0) - 1; };
-        Note.numberToNote = function (n, octave) { return n === 0 ? 132 : numToNote[n] + 12 * (octave + 1); };
+        Note.numberToNote = function (n, octave) { return n === 0 ? 132 : numToNote[n - 1] + 12 * (octave + 1); };
         return Note;
+    }());
+    function eventToString(e, useNum) {
+        if (useNum === void 0) { useNum = false; }
+        var n = useNum ? toneNum : toneName;
+        return "< " + n[Note.getTone(e.note)] + " " + Note.getOctave(e.note) + ", " + e.delta + ", " + e.duration + " >";
+    }
+
+    var List = (function () {
+        function List() {
+            this.head = null;
+            this.tail = null;
+        }
+        List.prototype.remove = function (node) {
+            if (node.prev)
+                node.prev.next = node.next;
+            if (node.next)
+                node.next.prev = node.prev;
+            if (node === this.head)
+                this.head = node.next;
+            if (node === this.tail)
+                this.tail = node.prev;
+        };
+        List.prototype.add = function (data) {
+            var node = { data: data, prev: this.tail, next: null };
+            if (!this.head)
+                this.head = node;
+            if (this.tail)
+                this.tail.next = node;
+            this.tail = node;
+        };
+        List.prototype.forEach = function (cb) {
+            for (var n = this.head; n; n = n.next) {
+                cb(n.data, n);
+            }
+        };
+        return List;
     }());
 
     var NodeType;
     (function (NodeType) {
-        NodeType[NodeType["NONE"] = 0] = "NONE";
+        NodeType[NodeType["VIA"] = 0] = "VIA";
         NodeType[NodeType["DASH"] = 1] = "DASH";
         NodeType[NodeType["UNDERLINE"] = 2] = "UNDERLINE";
         NodeType[NodeType["SHARP"] = 3] = "SHARP";
@@ -523,13 +588,20 @@
         '\'': NodeType.POS_OCTAVE,
         '*': NodeType.DOT
     };
+    var modifierWithVal = {
+        '-': NodeType.DASH,
+        '*': NodeType.DOT
+    };
     var nodeTypeToLiteral = ['', '-', '_', '#', 'b', '*', '\'', '.'];
     function createNoteNode(note, pos) {
-        return { next: null, sibling: null, parent: null, note: note, pos: pos };
+        return { next: null, sibling: null, parent: null, note: note, pos: pos, channel: 0, refCount: 1 };
     }
     function createNode(type, pos) {
         if (pos === void 0) { pos = null; }
         return { parent: null, type: type, pos: pos };
+    }
+    function createNodeWithVal(type, pos, val) {
+        return { type: type, parent: null, pos: pos, val: val };
     }
     var NoteNodeList = (function () {
         function NoteNodeList() {
@@ -537,21 +609,32 @@
             this.tail = null;
             this.sibling = null;
             this.topNode = null;
+            this._freeChildren = [];
         }
         NoteNodeList.prototype._copyFrom = function (list) {
             this.head = list.head;
             this.tail = list.tail;
             this.sibling = list.sibling;
             this.topNode = list.topNode;
+            this._freeChildren = list._freeChildren;
+        };
+        NoteNodeList.prototype._connectTailTo = function (node) {
+            this.tail.next = node;
+            for (var _i = 0, _a = this._freeChildren; _i < _a.length; _i++) {
+                var n = _a[_i];
+                n.next = node;
+            }
+            node.refCount = this._freeChildren.length + 1;
+            this._freeChildren.length = 0;
         };
         NoteNodeList.prototype.append = function (node) {
             if (this.head) {
-                this.tail.next = node;
+                this._connectTailTo(node);
                 this.tail = node;
             }
             else {
                 this.sibling = this.head = this.tail = node;
-                this.topNode = createNode(NodeType.NONE);
+                this.topNode = createNode(NodeType.VIA);
             }
             var top = node.parent = this.topNode;
             var cur = null;
@@ -574,34 +657,35 @@
                     this.sibling.sibling = list.head;
                     this.sibling = list.sibling;
                     list.topNode.parent = this.topNode;
+                    this._freeChildren.push(list.tail);
                 }
                 else
-                    this._copyFrom(list);
+                    throw 'unreachable';
             }
         };
         NoteNodeList.prototype.concat = function (list) {
             if (list.head) {
                 if (this.head) {
-                    this.tail.next = list.head;
+                    this._connectTailTo(list.head);
                     this.tail = list.tail;
                     list.topNode.parent = this.topNode;
                 }
-                else
+                else {
                     this._copyFrom(list);
-            }
-        };
-        NoteNodeList.prototype.getNodeSlot = function () {
-            var cela = this;
-            return {
-                insertNode: function (node) {
-                    if (cela.head) {
-                        var top_1 = cela.topNode;
-                        node.parent = top_1.parent;
-                        top_1.parent = node;
-                        cela.topNode = node;
-                    }
+                    this.topNode = list.topNode.parent = createNode(NodeType.VIA);
                 }
-            };
+                var top_1 = this.topNode;
+                var cur_1 = list.topNode;
+                return {
+                    insertNode: function (node) {
+                        node.parent = top_1;
+                        cur_1.parent = node;
+                        cur_1 = node;
+                    }
+                };
+            }
+            else
+                return null;
         };
         return NoteNodeList;
     }());
@@ -646,8 +730,7 @@
                 var slot = null;
                 if (tk.type === TokenType.BGROUP) {
                     var group = parseGroup();
-                    slot = group.getNodeSlot();
-                    list.concat(group);
+                    slot = list.concat(group);
                 }
                 else {
                     slot = list.append(parseNote(tk));
@@ -678,9 +761,26 @@
         function parseNoteModifiers(slot) {
             var tk = peek();
             while (tk.type === TokenType.OTHER && tk.text !== '|' && modifierToType.hasOwnProperty(tk.text)) {
-                slot.insertNode(createNode(modifierToType[tk.text], tk));
-                next();
-                tk = peek();
+                var type = modifierToType[tk.text];
+                if (modifierWithVal.hasOwnProperty(tk.text)) {
+                    var s = tk.text;
+                    var start = tk, end = tk;
+                    var num = 1;
+                    next();
+                    tk = peek();
+                    while (tk.text === s) {
+                        num++;
+                        end = tk;
+                        next();
+                        tk = peek();
+                    }
+                    slot.insertNode(createNodeWithVal(type, Range.between(start, end), num));
+                }
+                else {
+                    slot.insertNode(createNode(modifierToType[tk.text], tk));
+                    next();
+                    tk = peek();
+                }
             }
         }
     }
@@ -698,12 +798,75 @@
         }
         return [s];
     }
+    function createNoteQueue(list) {
+        var queue = new List();
+        pushNote(list.head, 0);
+        return {
+            pollNote: pollNote
+        };
+        function getNoteFromNode(node) {
+            var ret = new Note(node.note);
+            for (var n = node.parent; n; n = n.parent) {
+                switch (n.type) {
+                    case NodeType.DASH:
+                        ret.duration *= n.val;
+                        break;
+                    case NodeType.UNDERLINE:
+                        ret.duration >>= 1;
+                        break;
+                    case NodeType.POS_OCTAVE:
+                        ret.shiftOctave(1);
+                        break;
+                    case NodeType.NEG_OCTAVE:
+                        ret.shiftOctave(-1);
+                        break;
+                    case NodeType.SHARP:
+                        ret.shift(1);
+                        break;
+                    case NodeType.FLAT:
+                        ret.shift(-1);
+                        break;
+                    case NodeType.DOT:
+                        var factor = 1 << n.val;
+                        ret.duration = ret.duration * (2 * factor - 1) / factor;
+                        break;
+                }
+            }
+            return ret.normalize();
+        }
+        function pushNote(node, delta) {
+            for (; node; node = node.sibling) {
+                queue.add({ note: getNoteFromNode(node), delta: delta, node: node });
+            }
+        }
+        function pollNote() {
+            var first = queue.head;
+            if (first) {
+                for (var n = first.next; n; n = n.next) {
+                    if (n.data.delta < first.data.delta) {
+                        first = n;
+                    }
+                }
+                var ret_1 = first.data;
+                queue.remove(first);
+                queue.forEach(function (d, n) { return d.delta -= ret_1.delta; });
+                if (ret_1.node.next && --ret_1.node.next.refCount === 0) {
+                    pushNote(ret_1.node.next, ret_1.note.duration);
+                }
+                return ret_1.note.toEvent(0, ret_1.node.channel);
+            }
+            else
+                return null;
+        }
+    }
 
     exports.MacroExpander = MacroExpander;
     exports.Scanner = Scanner;
     exports.ErrorReporter = ErrorReporter;
     exports.createParser = createParser;
     exports.dumpNoteList = dumpNoteList;
+    exports.createNoteQueue = createNoteQueue;
+    exports.eventToString = eventToString;
 
     Object.defineProperty(exports, '__esModule', { value: true });
 

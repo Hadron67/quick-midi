@@ -1,5 +1,5 @@
 var main = require('../');
-var s = "{12{34}_}-";
+var s = "{1--|1.5.-----{2|4|6}-}7.";
 var i = 0;
 var reporter = new main.ErrorReporter();
 var scanner = new main.Scanner({
@@ -17,7 +17,9 @@ if (reporter.msgs.length){
     }
 }
 else {
-    for (var msg of main.dumpNoteList(ret)){
-        console.log(msg);
+    var queue = main.createNoteQueue(ret);
+    var note;
+    while ((note = queue.pollNote()) !== null){
+        console.log(main.eventToString(note, true));
     }
 }

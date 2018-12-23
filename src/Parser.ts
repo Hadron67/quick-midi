@@ -2,17 +2,18 @@
     \c{1} {5.12}_ 233 123255 56771'1' {2321}' 7
     \c{2} 
 */
-import { Midi, Channel, Note } from "./Sequence";
+import { Note, NoteEvent } from "./Sequence";
 import { ITokenSource, TokenType, Token, Range } from "./Token";
 import { MacroExpander } from "./MacroExpaner";
 import { ErrorReporter } from "./ErrorReporter";
+import { List, ListNode } from "./List";
 
 export interface Parser {
     parse(tkSource: ITokenSource): NoteNodeList;
 };
 
 enum NodeType {
-    NONE, DASH, UNDERLINE, SHARP, FLAT, DOT, POS_OCTAVE, NEG_OCTAVE
+    VIA, DASH, UNDERLINE, SHARP, FLAT, DOT, POS_OCTAVE, NEG_OCTAVE
 };
 
 const modifierToType = {
@@ -25,20 +26,29 @@ const modifierToType = {
     '*': NodeType.DOT
 };
 
+const modifierWithVal = {
+    '-': NodeType.DASH,
+    '*': NodeType.DOT
+};
+
 const nodeTypeToLiteral = ['', '-', '_', '#', 'b', '*', '\'', '.'];
 
 interface Node {
     pos: Range;
     parent: Node;
     type: NodeType;
+    val?: number;
 };
 
 interface NoteNode {
     next: NoteNode;
     sibling: NoteNode;
     parent: Node;
-    note: number;
     pos: Range;
+
+    note: number;
+    channel: number;
+    refCount: number;
 }
 
 interface INodeSlot {
@@ -60,10 +70,13 @@ class NodeList {
 };
 
 function createNoteNode(note: number, pos: Range): NoteNode{
-    return { next: null, sibling: null, parent: null, note, pos };
+    return { next: null, sibling: null, parent: null, note, pos, channel: 0, refCount: 1 };
 }
 function createNode(type: NodeType, pos: Range = null): Node{
     return { parent: null, type, pos };
+}
+function createNodeWithVal(type: NodeType, pos: Range, val: number): Node{
+    return { type, parent: null, pos, val };
 }
 
 class NoteNodeList {
@@ -71,20 +84,32 @@ class NoteNodeList {
     tail: NoteNode = null;
     sibling: NoteNode = null;
     topNode: Node = null;
+
+    private _freeChildren: NoteNode[] = [];
     private _copyFrom(list: NoteNodeList){
         this.head = list.head;
         this.tail = list.tail;
         this.sibling = list.sibling;
         this.topNode = list.topNode;
+        this._freeChildren = list._freeChildren;
+    }
+    private _connectTailTo(node: NoteNode){
+        this.tail.next = node;
+        for (let n of this._freeChildren){
+            n.next = node;
+        }
+        node.refCount = this._freeChildren.length + 1;
+        this._freeChildren.length = 0;
     }
     append(node: NoteNode): INodeSlot{
         if (this.head) {
-            this.tail.next = node;
+            // this.tail.next = node;
+            this._connectTailTo(node);
             this.tail = node;
         }
         else {
             this.sibling = this.head = this.tail = node;
-            this.topNode = createNode(NodeType.NONE);
+            this.topNode = createNode(NodeType.VIA);
         }
         let top = node.parent = this.topNode;
         let cur: Node = null;
@@ -107,34 +132,37 @@ class NoteNodeList {
                 this.sibling.sibling = list.head;
                 this.sibling = list.sibling;
                 list.topNode.parent = this.topNode;
+
+                this._freeChildren.push(list.tail);
             }
             else 
-                this._copyFrom(list);
+                throw 'unreachable';
         }
     }
-    concat(list: NoteNodeList){
+    concat(list: NoteNodeList): INodeSlot{
         if (list.head){
             if (this.head){
-                this.tail.next = list.head;
+                // this.tail.next = list.head;
+                this._connectTailTo(list.head);
                 this.tail = list.tail;
                 list.topNode.parent = this.topNode;
             }
-            else
+            else {
                 this._copyFrom(list);
-        }
-    }
-    getNodeSlot(): INodeSlot{
-        let cela = this;
-        return {
-            insertNode(node: Node){
-                if (cela.head){
-                    let top = cela.topNode;
-                    node.parent = top.parent;
-                    top.parent = node;
-                    cela.topNode = node;
-                }
+                this.topNode = list.topNode.parent = createNode(NodeType.VIA);
             }
-        };
+            let top = this.topNode;
+            let cur = list.topNode;
+            return {
+                insertNode(node: Node){
+                    node.parent = top;
+                    cur.parent = node;
+                    cur = node;
+                }
+            };
+        }
+        else 
+            return null;
     }
 };
 
@@ -142,8 +170,6 @@ const regNum = /[0-9]/;
 
 export function createParser(eReporter: ErrorReporter): Parser{
     let macroExpander: MacroExpander = new MacroExpander(eReporter);
-    let midi: Midi;
-    let currentChannel: Channel;
     let defaultOctave = 4;
 
     macroExpander.macros
@@ -195,8 +221,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
             let slot: INodeSlot = null;
             if (tk.type === TokenType.BGROUP){
                 let group = parseGroup();
-                slot = group.getNodeSlot();
-                list.concat(group);
+                slot = list.concat(group);
             }
             else {
                 slot = list.append(parseNote(tk));
@@ -227,14 +252,31 @@ export function createParser(eReporter: ErrorReporter): Parser{
     }
     
     /**
-     * ( '_' | '-' | '#' | 'b' | '.' | '\'' | '\*' )*
+     * ( '_' | '-'+ | '#' | 'b' | '.' | '\'' | '\*'+ )*
      */
     function parseNoteModifiers(slot: INodeSlot){
         let tk = peek();
         while (tk.type === TokenType.OTHER && tk.text !== '|' && modifierToType.hasOwnProperty(tk.text)){
-            slot.insertNode(createNode(modifierToType[tk.text], tk));
-            next();
-            tk = peek();
+            let type = modifierToType[tk.text];
+            if (modifierWithVal.hasOwnProperty(tk.text)){
+                let s = tk.text;
+                let start = tk, end = tk;
+                let num = 1;
+                next();
+                tk = peek();
+                while (tk.text === s){
+                    num++;
+                    end = tk;
+                    next();
+                    tk = peek();
+                }
+                slot.insertNode(createNodeWithVal(type, Range.between(start, end), num));
+            }
+            else {
+                slot.insertNode(createNode(modifierToType[tk.text], tk));
+                next();
+                tk = peek();
+            }
         }
     }
 }
@@ -252,4 +294,85 @@ export function dumpNoteList(list: NoteNodeList): string[]{
         s += node.note + getModifiers(node) + ' ';
     }
     return [s];
+}
+
+interface ISortedNoteEventQueue {
+    pollNote(): NoteEvent;
+};
+
+interface NoteWithTime {
+    delta: number;
+    note: Note;
+    node: NoteNode;
+};
+
+export function createNoteQueue(list: NoteNodeList): ISortedNoteEventQueue{
+    let queue: List<NoteWithTime> = new List();
+
+    pushNote(list.head, 0);
+
+    return {
+        pollNote
+    };
+
+    function getNoteFromNode(node: NoteNode): Note{
+        let ret = new Note(node.note);
+        for (let n = node.parent; n; n = n.parent){
+            switch (n.type){
+                case NodeType.DASH:
+                    ret.duration *= n.val;
+                    break;
+                case NodeType.UNDERLINE:
+                    ret.duration >>= 1;
+                    break;
+                case NodeType.POS_OCTAVE:
+                    ret.shiftOctave(1);
+                    break;
+                case NodeType.NEG_OCTAVE:
+                    ret.shiftOctave(-1);
+                    break;
+                case NodeType.SHARP:
+                    ret.shift(1);
+                    break;
+                case NodeType.FLAT:
+                    ret.shift(-1);
+                    break;
+                case NodeType.DOT:
+                    let factor = 1 << n.val;
+                    ret.duration = ret.duration * (2 * factor - 1) / factor;
+                    break;
+                // VIA has no effect on notes.
+            }
+        }
+        return ret.normalize();
+    }
+    function pushNote(node: NoteNode, delta: number){
+        for (; node; node = node.sibling){
+            queue.add({ note: getNoteFromNode(node), delta, node });
+        }
+    }
+    
+    function pollNote(): NoteEvent {
+        let first: ListNode<NoteWithTime> = queue.head;
+        if (first){
+            for (let n = first.next; n; n = n.next){
+                if (n.data.delta < first.data.delta){
+                    first = n;
+                }
+            }
+            let ret = first.data;
+            queue.remove(first);
+            queue.forEach((d, n) => d.delta -= ret.delta);
+            if (ret.node.next && --ret.node.next.refCount === 0){
+                pushNote(ret.node.next, ret.note.duration);
+            }
+            return ret.note.toEvent(0, ret.node.channel);
+        }
+        else
+            return null;
+    }
+}
+
+function noteQueueToEvent(queue: ISortedNoteEventQueue){
+
 }
