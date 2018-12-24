@@ -10,6 +10,7 @@ import { List, ListNode } from "./List";
 
 export interface Parser {
     parse(tkSource: ITokenSource): NoteNodeList;
+    parseAndConvert(tkSource: ITokenSource): NoteEvent[];
 };
 
 enum NodeType {
@@ -55,19 +56,7 @@ interface INodeSlot {
     insertNode(node: Node): any;
 };
 
-class NodeList {
-    top: Node = null;
-    bottom: Node = null;
-    appendNode(node: Node){
-        if (this.bottom){
-            this.top.parent = node;
-            this.top = node;
-        }
-        else {
-            this.top = this.bottom = node;
-        }
-    }
-};
+const dummyNodeSlot: INodeSlot = { insertNode(node){} };
 
 function createNoteNode(note: number, pos: Range): NoteNode{
     return { next: null, sibling: null, parent: null, note, pos, channel: 0, refCount: 1 };
@@ -162,7 +151,7 @@ class NoteNodeList {
             };
         }
         else 
-            return null;
+            return dummyNodeSlot;
     }
 };
 
@@ -177,7 +166,8 @@ export function createParser(eReporter: ErrorReporter): Parser{
     .defineMeta('\\tri');
     
     return { 
-        parse
+        parse,
+        parseAndConvert
     };
 
     function next(){
@@ -191,6 +181,10 @@ export function createParser(eReporter: ErrorReporter): Parser{
     function parse(tkSource: ITokenSource): NoteNodeList{
         macroExpander.init(tkSource);
         return parseSequence();
+    }
+
+    function parseAndConvert(tkSource: ITokenSource): NoteEvent[]{
+        return mergeOverlapedEvents(createNoteQueue(parse(tkSource)));
     }
 
     /**
@@ -301,7 +295,7 @@ interface ISortedNoteEventQueue {
 };
 
 interface NoteWithTime {
-    delta: number;
+    time: number;
     note: Note;
     node: NoteNode;
 };
@@ -320,7 +314,7 @@ export function createNoteQueue(list: NoteNodeList): ISortedNoteEventQueue{
         for (let n = node.parent; n; n = n.parent){
             switch (n.type){
                 case NodeType.DASH:
-                    ret.duration *= n.val;
+                    ret.duration *= n.val + 1;
                     break;
                 case NodeType.UNDERLINE:
                     ret.duration >>= 1;
@@ -348,31 +342,65 @@ export function createNoteQueue(list: NoteNodeList): ISortedNoteEventQueue{
     }
     function pushNote(node: NoteNode, delta: number){
         for (; node; node = node.sibling){
-            queue.add({ note: getNoteFromNode(node), delta, node });
+            queue.add({ note: getNoteFromNode(node), time: delta, node });
         }
     }
     
     function pollNote(): NoteEvent {
-        let first: ListNode<NoteWithTime> = queue.head;
-        if (first){
-            for (let n = first.next; n; n = n.next){
-                if (n.data.delta < first.data.delta){
-                    first = n;
+        do {
+            let first: ListNode<NoteWithTime> = queue.head;
+            if (first){
+                for (let n = first.next; n; n = n.next){
+                    if (n.data.time < first.data.time){
+                        first = n;
+                    }
                 }
+                let ret = first.data;
+                queue.remove(first);
+                if (ret.node.next && --ret.node.next.refCount === 0){
+                    pushNote(ret.node.next, ret.time + ret.note.duration);
+                }
+                if (!ret.note.isRest())
+                    return ret.note.toEvent(ret.time, ret.node.channel);
             }
-            let ret = first.data;
-            queue.remove(first);
-            queue.forEach((d, n) => d.delta -= ret.delta);
-            if (ret.node.next && --ret.node.next.refCount === 0){
-                pushNote(ret.node.next, ret.note.duration);
-            }
-            return ret.note.toEvent(0, ret.node.channel);
-        }
-        else
-            return null;
+            else
+                return null;
+        } while(true);
     }
 }
 
-function noteQueueToEvent(queue: ISortedNoteEventQueue){
+interface RunningEvent {
+    endTime: number;
+    event: NoteEvent;
+};
 
+function mergeOverlapedEvents(queue: ISortedNoteEventQueue): NoteEvent[]{
+    let events: NoteEvent[] = [];
+    let running: List<RunningEvent> = new List();
+    function emitNote(note: NoteEvent){
+        let time = note.time;
+        for (let n = running.head; n; n = n.next){
+            let n2 = n.data;
+            if (time >= n2.endTime)
+                running.remove(n);
+            else if (n2.event.note === note.note && n2.event.channel === note.channel){
+                let l = note.duration - (n2.endTime - time);
+                if (l > 0){
+                    n2.endTime += l;
+                    n2.event.duration += l;
+                }
+                return;
+            }
+        }
+        running.add({ event: note, endTime: time + note.duration });
+        events.push(note);
+    }
+
+    let e = queue.pollNote();
+    while (e){
+        emitNote(e);
+        e = queue.pollNote();
+    }
+
+    return events;
 }

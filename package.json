@@ -4,7 +4,7 @@
   "description": "Creating midi files from numbered musical notation (简谱)",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha tests/"
   },
   "keywords": [
     "music",
@@ -20,6 +20,7 @@
     "typescript": "^3.2.2",
     "rollup-plugin-sourcemaps": "^0.4.2",
     "rollup-plugin-typescript2": "^0.18.1",
-    "tone": "^0.12.80"
+    "tone": "^0.12.80",
+    "mocha": "^5.2.0"
   }
 }

@@ -54,6 +54,9 @@ class Token extends Range {
         let t = this.text === null ? '' : this.text;
         return this.hasWhiteSpace ? ' ' + t : t;
     }
+    isEOF(){
+        return this.type === TokenType.EOF;
+    }
 }
 
 interface ITokenSource {

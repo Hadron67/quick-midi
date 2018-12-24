@@ -64,8 +64,8 @@ export class Note {
     isRest(){
         return this.note === 132;
     }
-    toEvent(delta: number, channel: number): NoteEvent{
-        return { delta, channel, velocity: this.velocity, note: this.note, duration: this.duration };
+    toEvent(time: number, channel: number): NoteEvent{
+        return { time, channel, velocity: this.velocity, note: this.note, duration: this.duration };
     }
     static getTone(note: number){ return note % 12; }
     static getOctave(note: number){ return (note / 12 | 0) - 1; }
@@ -73,7 +73,7 @@ export class Note {
 }
 
 export interface NoteEvent {
-    delta: number;
+    time: number;
     channel: number;
     note: number;
     duration: number;
@@ -83,5 +83,5 @@ export interface NoteEvent {
 export function eventToString(e: NoteEvent, useNum: boolean = false){
     let note = '';
     const n: string[] = useNum ? toneNum : toneName;
-    return `< ${n[Note.getTone(e.note)]} ${Note.getOctave(e.note)}, ${e.delta}, ${e.duration} >`;
+    return `< ${n[Note.getTone(e.note)]} ${Note.getOctave(e.note)}, ${e.time}, ${e.duration} >`;
 }

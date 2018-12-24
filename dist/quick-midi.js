@@ -95,6 +95,9 @@
             var t = this.text === null ? '' : this.text;
             return this.hasWhiteSpace ? ' ' + t : t;
         };
+        Token.prototype.isEOF = function () {
+            return this.type === TokenType.EOF;
+        };
         return Token;
     }(Range));
 
@@ -107,7 +110,7 @@
             this.argCount = 0;
             this.name = nameToken.text;
         }
-        TeXMacro.prototype.run = function (e) {
+        TeXMacro.prototype.run = function (e, macroToken) {
             var ret = [], param = new Array(this.argCount);
             var t;
             for (var i = 0, _a = this.fmt; i < _a.length; i++) {
@@ -121,18 +124,28 @@
                         var next = _a[i + 1];
                         selectedParam = param[f.val] = [];
                         t = e.peekToken(false);
-                        while (t.type !== TokenType.EOF && t.text !== next.text) {
-                            e.readPossibleGroup(e.nextToken(false), false, selectedParam);
-                            t = e.peekToken(false);
+                        if (t.type !== TokenType.EOF && t.text !== next.text) {
+                            while (t.type !== TokenType.EOF && t.text !== next.text) {
+                                e.readPossibleGroup(e.nextToken(false), false, selectedParam);
+                                t = e.peekToken(false);
+                            }
+                        }
+                        else {
+                            e.eReporter.complationError("Use of macro " + this.name + " that doesn't match its definition", t);
+                            e.nextToken(false);
+                            return null;
                         }
                     }
                 }
                 else {
                     t = e.nextToken(false);
-                    if (t.type === TokenType.EOF)
+                    if (t.type === TokenType.EOF) {
                         e.eReporter.complationError("Unexpected end of file: use of macro " + this.name + " that doesn't match its definition", t);
+                        return null;
+                    }
                     else if (f.text !== t.text) {
                         e.eReporter.complationError("Use of macro " + this.name + " that doesn't match its definition", t);
+                        return null;
                     }
                 }
             }
@@ -150,6 +163,9 @@
                 else
                     ret.push(tk);
             }
+            if (ret.length >= 1) {
+                ret[0].hasWhiteSpace = ret[0].hasWhiteSpace || macroToken.hasWhiteSpace;
+            }
             return new TokenArray(ret);
         };
         return TeXMacro;
@@ -164,6 +180,9 @@
                     return _a[i][name];
             }
             return null;
+        };
+        MacroSet.prototype.reset = function () {
+            this.macroStack = [{}];
         };
         MacroSet.prototype.defineMacro = function (m, global) {
             if (global === void 0) { global = false; }
@@ -248,13 +267,14 @@
             this.processStack.length = 0;
             this._tk = null;
             this.processStack.push(ts);
+            this.macros.reset();
         };
         MacroExpander.prototype._expand = function (tk, macro) {
             if (macro === null) {
                 this.eReporter.complationError("Undefined control sequence " + tk.text, tk);
                 return;
             }
-            var ts = macro.run(this);
+            var ts = macro.run(this, tk);
             if (ts !== null) {
                 if (this.processStack.length >= this.maxNestedMacro) {
                     this.eReporter.complationError('Maximum nested macro expansion exceeded', tk);
@@ -482,6 +502,12 @@
         ErrorReporter.prototype.complationError = function (msg, range) {
             this.msgs.push({ msg: msg, range: range });
         };
+        ErrorReporter.prototype.forEach = function (cb) {
+            for (var _i = 0, _a = this.msgs; _i < _a.length; _i++) {
+                var msg = _a[_i];
+                cb(msg);
+            }
+        };
         return ErrorReporter;
     }());
 
@@ -523,8 +549,8 @@
         Note.prototype.isRest = function () {
             return this.note === 132;
         };
-        Note.prototype.toEvent = function (delta, channel) {
-            return { delta: delta, channel: channel, velocity: this.velocity, note: this.note, duration: this.duration };
+        Note.prototype.toEvent = function (time, channel) {
+            return { time: time, channel: channel, velocity: this.velocity, note: this.note, duration: this.duration };
         };
         Note.getTone = function (note) { return note % 12; };
         Note.getOctave = function (note) { return (note / 12 | 0) - 1; };
@@ -534,7 +560,7 @@
     function eventToString(e, useNum) {
         if (useNum === void 0) { useNum = false; }
         var n = useNum ? toneNum : toneName;
-        return "< " + n[Note.getTone(e.note)] + " " + Note.getOctave(e.note) + ", " + e.delta + ", " + e.duration + " >";
+        return "< " + n[Note.getTone(e.note)] + " " + Note.getOctave(e.note) + ", " + e.time + ", " + e.duration + " >";
     }
 
     var List = (function () {
@@ -593,6 +619,7 @@
         '*': NodeType.DOT
     };
     var nodeTypeToLiteral = ['', '-', '_', '#', 'b', '*', '\'', '.'];
+    var dummyNodeSlot = { insertNode: function (node) { } };
     function createNoteNode(note, pos) {
         return { next: null, sibling: null, parent: null, note: note, pos: pos, channel: 0, refCount: 1 };
     }
@@ -685,7 +712,7 @@
                 };
             }
             else
-                return null;
+                return dummyNodeSlot;
         };
         return NoteNodeList;
     }());
@@ -697,7 +724,8 @@
             .defineInternalMacros()
             .defineMeta('\\tri');
         return {
-            parse: parse
+            parse: parse,
+            parseAndConvert: parseAndConvert
         };
         function next() {
             return macroExpander.nextToken();
@@ -708,6 +736,9 @@
         function parse(tkSource) {
             macroExpander.init(tkSource);
             return parseSequence();
+        }
+        function parseAndConvert(tkSource) {
+            return mergeOverlapedEvents(createNoteQueue(parse(tkSource)));
         }
         function parseGroup() {
             next();
@@ -809,7 +840,7 @@
             for (var n = node.parent; n; n = n.parent) {
                 switch (n.type) {
                     case NodeType.DASH:
-                        ret.duration *= n.val;
+                        ret.duration *= n.val + 1;
                         break;
                     case NodeType.UNDERLINE:
                         ret.duration >>= 1;
@@ -836,28 +867,58 @@
         }
         function pushNote(node, delta) {
             for (; node; node = node.sibling) {
-                queue.add({ note: getNoteFromNode(node), delta: delta, node: node });
+                queue.add({ note: getNoteFromNode(node), time: delta, node: node });
             }
         }
         function pollNote() {
-            var first = queue.head;
-            if (first) {
-                for (var n = first.next; n; n = n.next) {
-                    if (n.data.delta < first.data.delta) {
-                        first = n;
+            do {
+                var first = queue.head;
+                if (first) {
+                    for (var n = first.next; n; n = n.next) {
+                        if (n.data.time < first.data.time) {
+                            first = n;
+                        }
                     }
+                    var ret = first.data;
+                    queue.remove(first);
+                    if (ret.node.next && --ret.node.next.refCount === 0) {
+                        pushNote(ret.node.next, ret.time + ret.note.duration);
+                    }
+                    if (!ret.note.isRest())
+                        return ret.note.toEvent(ret.time, ret.node.channel);
                 }
-                var ret_1 = first.data;
-                queue.remove(first);
-                queue.forEach(function (d, n) { return d.delta -= ret_1.delta; });
-                if (ret_1.node.next && --ret_1.node.next.refCount === 0) {
-                    pushNote(ret_1.node.next, ret_1.note.duration);
-                }
-                return ret_1.note.toEvent(0, ret_1.node.channel);
-            }
-            else
-                return null;
+                else
+                    return null;
+            } while (true);
         }
+    }
+    function mergeOverlapedEvents(queue) {
+        var events = [];
+        var running = new List();
+        function emitNote(note) {
+            var time = note.time;
+            for (var n = running.head; n; n = n.next) {
+                var n2 = n.data;
+                if (time >= n2.endTime)
+                    running.remove(n);
+                else if (n2.event.note === note.note && n2.event.channel === note.channel) {
+                    var l = note.duration - (n2.endTime - time);
+                    if (l > 0) {
+                        n2.endTime += l;
+                        n2.event.duration += l;
+                    }
+                    return;
+                }
+            }
+            running.add({ event: note, endTime: time + note.duration });
+            events.push(note);
+        }
+        var e = queue.pollNote();
+        while (e) {
+            emitNote(e);
+            e = queue.pollNote();
+        }
+        return events;
     }
 
     exports.MacroExpander = MacroExpander;

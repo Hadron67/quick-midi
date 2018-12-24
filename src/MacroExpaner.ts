@@ -4,7 +4,7 @@ import { ErrorReporter } from './ErrorReporter';
 interface Macro {
     name: string;
     isMeta: boolean;
-    run(e: MacroExpander): ITokenSource;
+    run(e: MacroExpander, token: Token): ITokenSource;
 }
 
 class TeXMacro implements Macro {
@@ -16,7 +16,7 @@ class TeXMacro implements Macro {
     constructor(public nameToken: Token){
         this.name = nameToken.text;
     }
-    run(e: MacroExpander){
+    run(e: MacroExpander, macroToken: Token){
         let ret: Token[] = [], param: Token[][] = new Array(this.argCount);
         let t: Token;
         for (let i = 0, _a = this.fmt; i < _a.length; i++){
@@ -30,18 +30,28 @@ class TeXMacro implements Macro {
                     let next = _a[i + 1];
                     selectedParam = param[f.val] = [];
                     t = e.peekToken(false);
-                    while(t.type !== TokenType.EOF && t.text !== next.text){
-                        e.readPossibleGroup(e.nextToken(false), false, selectedParam);
-                        t = e.peekToken(false);
+                    if (t.type !== TokenType.EOF && t.text !== next.text) {
+                        while(t.type !== TokenType.EOF && t.text !== next.text){
+                            e.readPossibleGroup(e.nextToken(false), false, selectedParam);
+                            t = e.peekToken(false);
+                        }
+                    }
+                    else {
+                        e.eReporter.complationError(`Use of macro ${this.name} that doesn't match its definition`, t);
+                        e.nextToken(false);
+                        return null;
                     }
                 }
             }
             else {
                 t = e.nextToken(false);
-                if (t.type === TokenType.EOF)
+                if (t.type === TokenType.EOF){
                     e.eReporter.complationError(`Unexpected end of file: use of macro ${this.name} that doesn't match its definition`, t);
+                    return null;
+                }
                 else if (f.text !== t.text){
                     e.eReporter.complationError(`Use of macro ${this.name} that doesn't match its definition`, t);
+                    return null;
                 }
             }
         }
@@ -57,6 +67,9 @@ class TeXMacro implements Macro {
             else
                 ret.push(tk);
         }
+        if (ret.length >= 1){
+            ret[0].hasWhiteSpace = ret[0].hasWhiteSpace || macroToken.hasWhiteSpace;
+        }
         return new TokenArray(ret);
     }
 }
@@ -69,6 +82,9 @@ class MacroSet {
                 return _a[i][name];
         }
         return null;
+    }
+    reset(){
+        this.macroStack = [{}];
     }
     defineMacro(m: Macro, global: boolean = false){
         this.macroStack[global ? 0 : (this.macroStack.length - 1)][m.name] = m;
@@ -156,6 +172,7 @@ class MacroExpander implements ITokenSource {
         this.processStack.length = 0;
         this._tk = null;
         this.processStack.push(ts);
+        this.macros.reset();
     }
     // token must be cosumed first
     private _expand(tk: Token, macro: Macro){
@@ -163,7 +180,7 @@ class MacroExpander implements ITokenSource {
             this.eReporter.complationError(`Undefined control sequence ${tk.text}`, tk);
             return;
         }
-        let ts = macro.run(this);
+        let ts = macro.run(this, tk);
         if (ts !== null){
             if (this.processStack.length >= this.maxNestedMacro){
                 this.eReporter.complationError('Maximum nested macro expansion exceeded', tk);

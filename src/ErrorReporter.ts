@@ -15,6 +15,11 @@ class ErrorReporter {
     complationError(msg: string, range: Range){
         this.msgs.push({msg, range});
     }
+    forEach(cb: (msg: DiagnosisMsg) => any){
+        for (let msg of this.msgs){
+            cb(msg);
+        }
+    }
 }
 
 export { ErrorReporter }

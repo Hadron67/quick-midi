@@ -6,7 +6,10 @@ dist/quick-midi.js: src/*.ts
 clean:
 	$(RM) dist/*
 
+test:
+	mocha tests/
+
 sandwitch:
 	@[ "`whoami`" = "root" ] && echo "Okay." || echo "What? Make it yourself."
 
-.PHONY: clean sandwitch
+.PHONY: clean sandwitch test

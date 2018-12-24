@@ -7,17 +7,17 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "parse.js",
-            "program": "${workspaceFolder}/tests/parse.js"
+            "name": "tex.js",
+            "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
+            "args": [
+                "${workspaceFolder}/tests/tex.js"
+            ],
         },
         {
             "type": "node",
             "request": "launch",
-            "name": "tex.js",
-            "program": "${workspaceFolder}/tests/tex.js",
-            "outFiles": [
-                "${workspaceFolder}/**/*.js"
-            ]
+            "name": "parse.js",
+            "program": "${workspaceFolder}/tests/parse.js"
         }
     ]
 }
