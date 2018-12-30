@@ -7,6 +7,21 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "test parser.js",
+            "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
+            "args": [
+                "-u",
+                "tdd",
+                "--timeout",
+                "999999",
+                "--colors",
+                "${workspaceFolder}/tests/parse.js"
+            ],
+            "internalConsoleOptions": "openOnSessionStart"
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "tex.js",
             "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
             "args": [

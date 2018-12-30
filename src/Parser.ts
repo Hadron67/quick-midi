@@ -2,87 +2,119 @@
     \c{1} {5.12}_ 233 123255 56771'1' {2321}' 7
     \c{2} 
 */
-import { Note, NoteEvent } from "./Sequence";
+import { Note, MidiEventType, MidiEvent, createNoteOnEvent, createNoteOffEvent, createTempoChangeEvent, MidiFile, Track } from "./Sequence";
 import { ITokenSource, TokenType, Token, Range } from "./Token";
 import { MacroExpander } from "./MacroExpaner";
 import { ErrorReporter } from "./ErrorReporter";
 import { List, ListNode } from "./List";
 
 export interface Parser {
-    parse(tkSource: ITokenSource): NoteNodeList;
-    parseAndConvert(tkSource: ITokenSource): NoteEvent[];
+    parse(tkSource: ITokenSource): MidiFile;
 };
 
-enum NodeType {
+enum ModifierNodeType {
     VIA, DASH, UNDERLINE, SHARP, FLAT, DOT, POS_OCTAVE, NEG_OCTAVE
 };
 
 const modifierToType = {
-    '_': NodeType.UNDERLINE,
-    '-': NodeType.DASH,
-    '#': NodeType.SHARP,
-    'b': NodeType.FLAT,
-    '.': NodeType.NEG_OCTAVE,
-    '\'': NodeType.POS_OCTAVE,
-    '*': NodeType.DOT
+    '_': ModifierNodeType.UNDERLINE,
+    '-': ModifierNodeType.DASH,
+    '#': ModifierNodeType.SHARP,
+    'b': ModifierNodeType.FLAT,
+    '.': ModifierNodeType.NEG_OCTAVE,
+    '\'': ModifierNodeType.POS_OCTAVE,
+    '*': ModifierNodeType.DOT
 };
 
 const modifierWithVal = {
-    '-': NodeType.DASH,
-    '*': NodeType.DOT
+    '-': ModifierNodeType.DASH,
+    '*': ModifierNodeType.DOT
 };
 
-const nodeTypeToLiteral = ['', '-', '_', '#', 'b', '*', '\'', '.'];
+const modifierNodeTypeToLiteral = ['', '-', '_', '#', 'b', '*', '\'', '.'];
 
-interface Node {
+interface ModifierNode {
     pos: Range;
-    parent: Node;
-    type: NodeType;
+    parent: ModifierNode;
+    type: ModifierNodeType;
     val?: number;
 };
 
-interface NoteNode {
-    next: NoteNode;
-    sibling: NoteNode;
-    parent: Node;
-    pos: Range;
+enum EventNodeType {
+    NOTE, REST, TEMPO_CHANGE
+};
 
-    note: number;
-    channel: number;
+interface EventNodeBase {
+    type: EventNodeType;
+    next: EventNode;
+    sibling: EventNode;
+    parent: ModifierNode;
+    pos: Range;
     refCount: number;
+    channel: number;
+}
+
+interface NoteEventNode extends EventNodeBase {
+    type: EventNodeType.NOTE;
+    note: number;
+    velocity: number;
+}
+
+interface TempoChangeEventNode extends EventNodeBase {
+    type: EventNodeType.TEMPO_CHANGE;
+    tempo: number;
+}
+
+interface RestEventNode extends EventNodeBase {
+    type: EventNodeType.REST;
+};
+
+type EventNode = NoteEventNode | TempoChangeEventNode | RestEventNode;
+
+function createNoteNode(note: number, velocity: number, pos: Range): NoteEventNode{
+    return { type: EventNodeType.NOTE, next: null, sibling: null, parent: null, note, pos, velocity, channel: 0, refCount: 1 };
+}
+function createModifierNode(type: ModifierNodeType, pos: Range = null): ModifierNode{
+    return { parent: null, type, pos };
+}
+function createModifierNodeWithVal(type: ModifierNodeType, pos: Range, val: number): ModifierNode{
+    return { type, parent: null, pos, val };
+}
+function createRestEventNode(pos: Range): RestEventNode{
+    return { type: EventNodeType.REST, next: null, sibling: null, parent: null, pos, refCount: 1, channel: 0 };
 }
 
 interface INodeSlot {
-    insertNode(node: Node): any;
+    insertNode(node: ModifierNode): any;
 };
 
 const dummyNodeSlot: INodeSlot = { insertNode(node){} };
 
-function createNoteNode(note: number, pos: Range): NoteNode{
-    return { next: null, sibling: null, parent: null, note, pos, channel: 0, refCount: 1 };
-}
-function createNode(type: NodeType, pos: Range = null): Node{
-    return { parent: null, type, pos };
-}
-function createNodeWithVal(type: NodeType, pos: Range, val: number): Node{
-    return { type, parent: null, pos, val };
-}
+type VoiceMap = {[name: string]: EventNodeList};
 
-class NoteNodeList {
-    head: NoteNode = null;
-    tail: NoteNode = null;
-    sibling: NoteNode = null;
-    topNode: Node = null;
+interface NodeTrack {
+    name: string;
+    instrument: number;
+    voices: VoiceMap;
+};
 
-    private _freeChildren: NoteNode[] = [];
-    private _copyFrom(list: NoteNodeList){
+type TrackMap = {[name: string]: NodeTrack};
+
+class EventNodeList {
+    head: EventNode = null;
+    tail: EventNode = null;
+    sibling: EventNode = null;
+    topNode: ModifierNode = null;
+
+    private _freeChildren: EventNode[] = [];
+    private _copyFrom(list: EventNodeList){
         this.head = list.head;
         this.tail = list.tail;
         this.sibling = list.sibling;
         this.topNode = list.topNode;
         this._freeChildren = list._freeChildren;
     }
-    private _connectTailTo(node: NoteNode){
+    private _connectTailTo(node: EventNode){
         this.tail.next = node;
         for (let n of this._freeChildren){
             n.next = node;
@@ -90,7 +122,7 @@ class NoteNodeList {
         node.refCount = this._freeChildren.length + 1;
         this._freeChildren.length = 0;
     }
-    append(node: NoteNode): INodeSlot{
+    append(node: EventNode): INodeSlot{
         if (this.head) {
             // this.tail.next = node;
             this._connectTailTo(node);
@@ -98,12 +130,12 @@ class NoteNodeList {
         }
         else {
             this.sibling = this.head = this.tail = node;
-            this.topNode = createNode(NodeType.VIA);
+            this.topNode = createModifierNode(ModifierNodeType.VIA);
         }
         let top = node.parent = this.topNode;
-        let cur: Node = null;
+        let cur: ModifierNode = null;
         return {
-            insertNode(n: Node){
+            insertNode(n: ModifierNode){
                 n.parent = top;
                 if (cur){
                     cur.parent = n;
@@ -115,20 +147,20 @@ class NoteNodeList {
             }
         };
     }
-    appendChild(list: NoteNodeList){
+    appendChild(list: EventNodeList, notDiverse = false){
         if (list.head){
             if (this.head){
                 this.sibling.sibling = list.head;
                 this.sibling = list.sibling;
                 list.topNode.parent = this.topNode;
 
-                this._freeChildren.push(list.tail);
+                notDiverse || this._freeChildren.push(list.tail);
             }
             else 
                 throw 'unreachable';
         }
     }
-    concat(list: NoteNodeList): INodeSlot{
+    concat(list: EventNodeList): INodeSlot{
         if (list.head){
             if (this.head){
                 // this.tail.next = list.head;
@@ -138,12 +170,12 @@ class NoteNodeList {
             }
             else {
                 this._copyFrom(list);
-                this.topNode = list.topNode.parent = createNode(NodeType.VIA);
+                this.topNode = list.topNode.parent = createModifierNode(ModifierNodeType.VIA);
             }
             let top = this.topNode;
             let cur = list.topNode;
             return {
-                insertNode(node: Node){
+                insertNode(node: ModifierNode){
                     node.parent = top;
                     cur.parent = node;
                     cur = node;
@@ -155,19 +187,24 @@ class NoteNodeList {
     }
 };
 
-const regNum = /[0-9]/;
+const regDigit = /[0-9]/;
+const regNum = /[0-9]+/g;
 
 export function createParser(eReporter: ErrorReporter): Parser{
     let macroExpander: MacroExpander = new MacroExpander(eReporter);
     let defaultOctave = 4;
+    let velocity = 80;
 
     macroExpander.macros
     .defineInternalMacros()
-    .defineMeta('\\tri');
+    .defineMeta('\\tempo')
+    .defineMeta('\\keysig')
+    .defineMeta('\\track')
+    .defineMeta('\\v')
+    .defineMeta('\\instrument');
     
     return { 
-        parse,
-        parseAndConvert
+        parse
     };
 
     function next(){
@@ -177,20 +214,127 @@ export function createParser(eReporter: ErrorReporter): Parser{
     function peek(){
         return macroExpander.peekToken();
     }
-
-    function parse(tkSource: ITokenSource): NoteNodeList{
-        macroExpander.init(tkSource);
-        return parseSequence();
+    function isMacro(tk: Token, name: string){
+        return tk.type === TokenType.MACRO && tk.text === name;
+    }
+    function readArg(){
+        let tks = macroExpander.readPossibleGroup(next(), false);
+        if (tks[0].type === TokenType.EOF){
+            eReporter.complationError('argument expected', tks[0]);
+            tks[0].text = '';
+            return tks[0];
+        }
+        else if (tks.length === 1){
+            return tks[0];
+        }
+        else {
+            let text = '';
+            for (let i = 1; i < tks.length - 1; i++){
+                text += tks[i].getText();
+            }
+            return new Token(TokenType.OTHER, text, tks[1].start, tks[tks.length - 2].end, tks[0].hasWhiteSpace);
+        }
     }
 
-    function parseAndConvert(tkSource: ITokenSource): NoteEvent[]{
-        return mergeOverlapedEvents(createNoteQueue(parse(tkSource)));
+    function parse(tkSource: ITokenSource): MidiFile{
+        macroExpander.init(tkSource);
+
+        let { tracks } = parseTop();
+        let file = new MidiFile();
+
+        for (let name in tracks){
+            file.tracks.push(convertTrack(tracks[name]));
+        }
+
+        return file;
+    }
+
+    function convertTrack(track: NodeTrack): Track {
+        let list = new EventNodeList();
+        for (let l in track.voices){
+            list.appendChild(track.voices[l], true);
+        }
+        return { 
+            name: track.name, 
+            instrument: track.instrument, 
+            events: mergeOverlapedEvents(createNoteQueue(list))
+        };
+    }
+
+    function parseTop(): { tracks: TrackMap }{
+        let tracks: TrackMap = {};
+
+        let tk = peek();
+        if (tk.type !== TokenType.EOF){
+            let track: NodeTrack, name: string;
+            if (!isMacro(tk, 'track')){
+                name = 'Track 1';
+                if (!tracks.hasOwnProperty(name)){
+                    parseTrackContent(tracks[name] = { name, instrument: -1, voices: {} });
+                }
+                else
+                    parseTrackContent(tracks[name]);
+                tk = peek();
+            }
+            while (isMacro(tk, 'track')){
+                next();
+                name = readArg().text;
+                if (!tracks.hasOwnProperty(name)){
+                    parseTrackContent(tracks[name] = { name, instrument: -1, voices: {} });
+                }
+                else
+                    parseTrackContent(tracks[name]);
+                tk = peek();
+            }
+        }
+
+        return { tracks };
+    }
+
+    function isTrackEnd(tk: Token){
+        return tk.type === TokenType.EOF ||
+        isMacro(tk, 'track');
+    }
+
+    function parseTrackContent(track: NodeTrack){
+        let tk = peek();
+        if (isMacro(tk, 'instrument')) {
+            next();
+            let name = readArg();
+            if (regNum.test(name.text))
+                track.instrument = Number(name.text);
+            else {
+                eReporter.complationError(`Unknown instrument number ${name.text}`, name);
+                track.instrument = 0;
+            }
+            tk = peek();
+        }
+        else {
+            track.instrument = 0;
+        }
+
+        if (!isTrackEnd(tk)){
+            if (!isMacro(tk, 'v')){
+                if (!track.voices['1'])
+                    track.voices['1'] = new EventNodeList();
+                track.voices['1'].concat(parseSequence());
+                tk = peek();
+            }
+            while (isMacro(tk, 'v')){
+                next();
+                let name = readArg();
+                if (!track.voices[name.text])
+                    track.voices[name.text] = new EventNodeList();
+                track.voices[name.text].concat(parseSequence());
+                tk = peek();
+            }
+        }
     }
 
     /**
      * '{' Sequence ( '|' Sequence )* '}'
      */
-    function parseGroup(): NoteNodeList {
+    function parseGroup(): EventNodeList {
         next();
         let list = parseSequence();
         let tk = peek();
@@ -205,13 +349,20 @@ export function createParser(eReporter: ErrorReporter): Parser{
         return list;
     }
 
+    function isSequenceEnd(tk: Token){
+        return tk.type === TokenType.EOF || 
+        tk.type === TokenType.EGROUP || 
+        tk.type === TokenType.OTHER && tk.text === '|' ||
+        isMacro(tk, 'v') ||
+        isMacro(tk, 'track');
+    }
     /**
      * ( (Note | Group) NoteModifiers )*
      */
-    function parseSequence(): NoteNodeList{
+    function parseSequence(): EventNodeList{
         let tk = peek();
-        let list = new NoteNodeList();
-        while (tk.type !== TokenType.EOF && tk.type !== TokenType.EGROUP && tk.text !== '|'){
+        let list = new EventNodeList();
+        while (!isSequenceEnd(tk)){
             let slot: INodeSlot = null;
             if (tk.type === TokenType.BGROUP){
                 let group = parseGroup();
@@ -226,22 +377,25 @@ export function createParser(eReporter: ErrorReporter): Parser{
         return list;
     }
 
-    function parseNote(tk: Token): NoteNode{
-        if (regNum.test(tk.text)){
+    function parseNote(tk: Token): EventNode{
+        if (regDigit.test(tk.text)){
             next();
             let n = Number(tk.text);
-            if (n >= 0 && n <= 7){
-                return createNoteNode(Note.numberToNote(n, defaultOctave), tk);
+            if (n >= 1 && n <= 7){
+                return createNoteNode(Note.numberToNote(n, defaultOctave), velocity,tk);
+            }
+            else if (n === 0){
+                return createRestEventNode(tk);
             }
             else {
                 eReporter.complationError(`Unknown note "${n}", valid notes are 0-7`, tk);
-                return createNoteNode(-1, tk);
+                return createNoteNode(-1, 0, tk);
             }
         }
         else {
             next();
             eReporter.complationError('Note expected', tk);
-            return createNoteNode(-1, tk);
+            return createNoteNode(-1, 0, tk);
         }
     }
     
@@ -264,10 +418,10 @@ export function createParser(eReporter: ErrorReporter): Parser{
                     next();
                     tk = peek();
                 }
-                slot.insertNode(createNodeWithVal(type, Range.between(start, end), num));
+                slot.insertNode(createModifierNodeWithVal(type, Range.between(start, end), num));
             }
             else {
-                slot.insertNode(createNode(modifierToType[tk.text], tk));
+                slot.insertNode(createModifierNode(modifierToType[tk.text], tk));
                 next();
                 tk = peek();
             }
@@ -275,33 +429,35 @@ export function createParser(eReporter: ErrorReporter): Parser{
     }
 }
 
-function getModifiers(note: NoteNode): string{
+function getModifiers(note: NoteEventNode): string{
     let s = '';
     for (let n = note.parent; n; n = n.parent){
-        s += nodeTypeToLiteral[n.type];
+        s += modifierNodeTypeToLiteral[n.type];
     }
     return s;
 }
-export function dumpNoteList(list: NoteNodeList): string[]{
+export function dumpNoteList(list: EventNodeList): string[]{
     let s = '';
     for (let node = list.head; node; node = node.next){
-        s += node.note + getModifiers(node) + ' ';
+        if (node.type === EventNodeType.NOTE){
+            s += node.note + getModifiers(node) + ' ';
+        }
     }
     return [s];
 }
 
 interface ISortedNoteEventQueue {
-    pollNote(): NoteEvent;
+    pollNote(): MidiEvent;
 };
 
-interface NoteWithTime {
-    time: number;
-    note: Note;
-    node: NoteNode;
+interface NodeWithEvent {
+    node: EventNode;
+    event: MidiEvent;
 };
 
-export function createNoteQueue(list: NoteNodeList): ISortedNoteEventQueue{
-    let queue: List<NoteWithTime> = new List();
+export function createNoteQueue(list: EventNodeList): ISortedNoteEventQueue{
+    let queue: List<NodeWithEvent> = new List();
+    let lastDelta = 0;
 
     pushNote(list.head, 0);
 
@@ -309,29 +465,29 @@ export function createNoteQueue(list: NoteNodeList): ISortedNoteEventQueue{
         pollNote
     };
 
-    function getNoteFromNode(node: NoteNode): Note{
-        let ret = new Note(node.note);
+    function getNoteFromNode(node: NoteEventNode | RestEventNode): Note{
+        let ret = new Note(node.type === EventNodeType.NOTE ? node.note : Note.REST);
         for (let n = node.parent; n; n = n.parent){
             switch (n.type){
-                case NodeType.DASH:
+                case ModifierNodeType.DASH:
                     ret.duration *= n.val + 1;
                     break;
-                case NodeType.UNDERLINE:
+                case ModifierNodeType.UNDERLINE:
                     ret.duration >>= 1;
                     break;
-                case NodeType.POS_OCTAVE:
+                case ModifierNodeType.POS_OCTAVE:
                     ret.shiftOctave(1);
                     break;
-                case NodeType.NEG_OCTAVE:
+                case ModifierNodeType.NEG_OCTAVE:
                     ret.shiftOctave(-1);
                     break;
-                case NodeType.SHARP:
+                case ModifierNodeType.SHARP:
                     ret.shift(1);
                     break;
-                case NodeType.FLAT:
+                case ModifierNodeType.FLAT:
                     ret.shift(-1);
                     break;
-                case NodeType.DOT:
+                case ModifierNodeType.DOT:
                     let factor = 1 << n.val;
                     ret.duration = ret.duration * (2 * factor - 1) / factor;
                     break;
@@ -340,67 +496,72 @@ export function createNoteQueue(list: NoteNodeList): ISortedNoteEventQueue{
         }
         return ret.normalize();
     }
-    function pushNote(node: NoteNode, delta: number){
-        for (; node; node = node.sibling){
-            queue.add({ note: getNoteFromNode(node), time: delta, node });
+    function pushNote(node: EventNode, delta: number){
+        if (node && --node.refCount === 0){
+            let stack: { node: EventNode, delta: number }[] = [{ node, delta }];
+            while (stack.length > 0){
+                let top = stack.pop();
+                delta = top.delta;
+                for (node = top.node; node; node = node.sibling){
+                    if (node.type === EventNodeType.NOTE){
+                        let note = getNoteFromNode(node);
+                        queue.add({ node: null, event: createNoteOnEvent(note.note, delta, node.channel, node.velocity) });
+                        queue.add({ node, event: createNoteOffEvent(note.note, delta + note.duration, node.channel, node.velocity) });
+                    }
+                    else if (node.type === EventNodeType.REST && node.next && --node.next.refCount === 0){
+                        let note = getNoteFromNode(node);
+                        stack.push({ node: node.next, delta: delta + note.duration });
+                    }
+                    else if (node.type === EventNodeType.TEMPO_CHANGE){
+                        queue.add({ node, event: createTempoChangeEvent(node.tempo, delta, node.channel) });
+                    }
+                    else
+                        throw new Error('unreachable');
+                }
+            }
         }
     }
     
-    function pollNote(): NoteEvent {
-        do {
-            let first: ListNode<NoteWithTime> = queue.head;
-            if (first){
-                for (let n = first.next; n; n = n.next){
-                    if (n.data.time < first.data.time){
-                        first = n;
-                    }
+    function pollNote(): MidiEvent {
+        let first: ListNode<NodeWithEvent> = queue.head;
+        if (first){
+            for (let n = first.next; n; n = n.next){
+                if (n.data.event.delta < first.data.event.delta){
+                    first = n;
                 }
-                let ret = first.data;
-                queue.remove(first);
-                if (ret.node.next && --ret.node.next.refCount === 0){
-                    pushNote(ret.node.next, ret.time + ret.note.duration);
-                }
-                if (!ret.note.isRest())
-                    return ret.note.toEvent(ret.time, ret.node.channel);
             }
-            else
-                return null;
-        } while(true);
+            let ret = first.data;
+            queue.remove(first);
+            queue.forEach(n => n.event.delta -= ret.event.delta);
+            if (ret.node){
+                pushNote(ret.node.next, 0);
+            }
+            return ret.event;
+        }
+        else
+            return null;
     }
 }
 
-interface RunningEvent {
-    endTime: number;
-    event: NoteEvent;
-};
 
-function mergeOverlapedEvents(queue: ISortedNoteEventQueue): NoteEvent[]{
-    let events: NoteEvent[] = [];
-    let running: List<RunningEvent> = new List();
-    function emitNote(note: NoteEvent){
-        let time = note.time;
-        for (let n = running.head; n; n = n.next){
-            let n2 = n.data;
-            if (time >= n2.endTime)
-                running.remove(n);
-            else if (n2.event.note === note.note && n2.event.channel === note.channel){
-                let l = note.duration - (n2.endTime - time);
-                if (l > 0){
-                    n2.endTime += l;
-                    n2.event.duration += l;
-                }
-                return;
-            }
+
+function mergeOverlapedEvents(queue: ISortedNoteEventQueue): MidiEvent[]{
+    let events: MidiEvent[] = [];
+    let noteRefCounts: number[] = [];
+    for (let i = 0; i < Note.NOTE_COUNT; i++){
+        noteRefCounts.push(0);
+    }
+    let event = queue.pollNote();
+    while (event){
+        if (event.type === MidiEventType.NOTEON && noteRefCounts[event.note]++ === 0){
+            events.push(event);
         }
-        running.add({ event: note, endTime: time + note.duration });
-        events.push(note);
+        else if (event.type === MidiEventType.NOTEOFF && --noteRefCounts[event.note] === 0){
+            events.push(event);
+        }
+        else
+            events.push(event);
+        event = queue.pollNote();
     }
-
-    let e = queue.pollNote();
-    while (e){
-        emitNote(e);
-        e = queue.pollNote();
-    }
-
     return events;
 }

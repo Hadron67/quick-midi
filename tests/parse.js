@@ -1,5 +1,6 @@
 var main = require('../');
 var assert = require('assert');
+var Note = main.Note;
 
 function createContext(){
     var s;
@@ -34,45 +35,82 @@ function createContext(){
 }
 
 var ctx = createContext();
-function test(dest, input, expect){
+class Tester {
+    constructor(){
+        this.channel = 0;
+        this.velocity = 80;
+        this.out = [];
+    }
+    noteOn(noteText, delta){
+        delta = (delta * Note.DEFLEN) | 0;
+        this.out.push(`NoteOn(channel = ${this.channel}, delta = ${delta}, note = ${noteText}, velocity = ${this.velocity})`);
+    }
+    noteOff(noteText, delta){
+        delta = (delta * Note.DEFLEN) | 0;
+        this.out.push(`NoteOff(channel = ${this.channel}, delta = ${delta}, note = ${noteText}, velocity = ${this.velocity})`);
+    }
+    tempo(tempo, delta){
+        delta = (delta * Note.DEFLEN) | 0;
+        this.out.push(`TempoChange(channel = ${this.channel}, delta = ${delta}, tempo = ${this.tempo})`);
+    }
+    raw(text){
+        this.out.push(text);
+    }
+    end(out){
+        assert.deepStrictEqual(out, this.out);
+    }
+};
+function test(dest, input, expectFunc){
     it(dest, function(){
-        assert.deepStrictEqual(ctx.run(input), expect);
+        var t = new Tester();
+        expectFunc(t);
+        t.end(ctx.run(input));
     });
 }
 
 describe('Sequencing with numbered musical notation', function(){
-    test('Empty input', '  {} {{}{}} {}*# {}__ {}---', []);
-    test('Basic one-voice sequence', 
-        '1231 {5654}_31',
-        [
-            '< 1 4, 0, 32 >',
-            '< 2 4, 32, 32 >',
-            '< 3 4, 64, 32 >',
-            '< 1 4, 96, 32 >',
+    this.timeout(200);
+    test('Empty input', '{}  {}#---- {{}{}-}__', t => {});
+    test('Basic one-voice sequence', '1231', t => {
+        t.noteOn ('1-4', 0);
+        t.noteOff('1-4', 1);
+        t.noteOn ('2-4', 0);
+        t.noteOff('2-4', 1);
+        t.noteOn ('3-4', 0);
+        t.noteOff('3-4', 1);
+        t.noteOn ('1-4', 0);
+        t.noteOff('1-4', 1);
+    });
+    test('Simple chorus', '{1|3|5-}23', t => {
+        t.noteOn ('1-4', 0);
+        t.noteOn ('3-4', 0);
+        t.noteOn ('5-4', 0);
+        t.noteOff('1-4', 1);
+        t.noteOff('3-4', 0);
+        t.noteOff('5-4', 1);
 
-            '< 5 4, 128, 16 >',
-            '< 6 4, 144, 16 >',
-            '< 5 4, 160, 16 >',
-            '< 4 4, 176, 16 >',
-            '< 3 4, 192, 32 >',
-            '< 1 4, 224, 32 >'
-        ]    
-    );
-    test('Note modifiers (dot, sharp)',
-        '1*5._ 4#*5_',
-        [
-            '< 1 4, 0, 48 >',
-            '< 5 3, 48, 16 >',
-            '< 4# 4, 64, 48 >',
-            '< 5 4, 112, 16 >'
-        ]
-    );
-    test('Merge notes that have overlap on the timeline',
-        '{1-35|01--}',
-        [
-            '< 1 4, 0, 128 >',
-            '< 3 4, 64, 32 >',
-            '< 5 4, 96, 32 >'
-        ]
-    );
+        t.noteOn ('2-4', 0);
+        t.noteOff('2-4', 1);
+        t.noteOn ('3-4', 0);
+        t.noteOff('3-4', 1);
+    });
+    test('Note modifiers', '1*5._ 1*3_ 5*6_ 5-', t => {
+        t.noteOn ('1-4', 0);
+        t.noteOff('1-4', 1.5);
+        t.noteOn ('5-3', 0);
+        t.noteOff('5-3', 0.5);
+
+        t.noteOn ('1-4', 0);
+        t.noteOff('1-4', 1.5);
+        t.noteOn ('3-4', 0);
+        t.noteOff('3-4', 0.5);
+
+        t.noteOn ('5-4', 0);
+        t.noteOff('5-4', 1.5);
+        t.noteOn ('6-4', 0);
+        t.noteOff('6-4', 0.5);
+
+        t.noteOn ('5-4', 0);
+        t.noteOff('5-4', 2);
+    });
 });
