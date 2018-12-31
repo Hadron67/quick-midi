@@ -23,7 +23,7 @@ class TeXMacro implements Macro {
             let f = _a[i];
             if (f.type === TokenType.MACRO_PARAM){
                 let selectedParam: Token[];
-                if (i === _a.length - 1){
+                if (i === _a.length - 1 || _a[i + 1].type === TokenType.MACRO_PARAM){
                     selectedParam = param[f.val] = e.readPossibleGroup(e.nextToken(false), false);
                 }
                 else {

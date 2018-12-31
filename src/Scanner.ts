@@ -20,7 +20,7 @@ class Scanner implements ITokenSource {
     egroupChar = '}';
     commentChar = '%';
 
-    constructor(private _source: ISource){}
+    constructor(private _source: ISource = null){}
     reset(s: ISource = null){
         this.pos.reset();
         this._tk = null;

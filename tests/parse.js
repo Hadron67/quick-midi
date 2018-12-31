@@ -1,4 +1,4 @@
-var main = require('../');
+var main = require('../').debug;
 var assert = require('assert');
 var Note = main.Note;
 
@@ -86,7 +86,7 @@ function test(dest, input, expectFunc){
 
 describe('Sequencing with numbered musical notation', function(){
     this.timeout(200);
-    var deftempo = 500;
+    var deftempo = 500000;
     test('Empty input', '{}  {}#---- {{}{}-}__', t => {
         t.beginFile(0, Note.DEFLEN, deftempo);
         t.beginTrack('Track 1', 0);
@@ -128,7 +128,7 @@ describe('Sequencing with numbered musical notation', function(){
         t.end();
         t.end();
     });
-    test('Note modifiers', '1*5._ 1*3_ 5*6_ 5-', t => {
+    test('Note modifiers', '1*5._ 1*3_ 5*6_ 5--- 4#*2_', t => {
         t.beginFile(0, Note.DEFLEN, deftempo);
         t.beginTrack('Track 1', 0);
 
@@ -148,7 +148,12 @@ describe('Sequencing with numbered musical notation', function(){
         t.noteOff('6-4', 0.5);
 
         t.noteOn ('5-4', 0);
-        t.noteOff('5-4', 2);
+        t.noteOff('5-4', 4);
+
+        t.noteOn ('4#-4', 0);
+        t.noteOff('4#-4', 1.5);
+        t.noteOn ('2-4', 0);
+        t.noteOff('2-4', 0.5);
 
         t.end();
         t.end();

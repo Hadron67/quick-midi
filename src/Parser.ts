@@ -95,6 +95,7 @@ type VoiceMap = {[name: string]: EventNodeList};
 interface NodeTrack {
     name: string;
     instrument: number;
+    volume: number;
     voices: VoiceMap;
 };
 
@@ -194,7 +195,7 @@ const regNum = /^[0-9]+$/;
 
 interface ParserResult {
     tracks: TrackMap;
-    tempo: number;
+    file: MidiFile;
 };
 
 export function createParser(eReporter: ErrorReporter): Parser{
@@ -208,7 +209,8 @@ export function createParser(eReporter: ErrorReporter): Parser{
     .defineMeta('\\keysig')
     .defineMeta('\\track')
     .defineMeta('\\v')
-    .defineMeta('\\instrument');
+    .defineMeta('\\instrument')
+    .defineMeta('\\bpm');
     
     return { 
         parse
@@ -225,7 +227,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
         return tk.type === TokenType.MACRO && tk.text === '\\' + name;
     }
     function readArg(){
-        let tks = macroExpander.readPossibleGroup(next(), false);
+        let tks = macroExpander.readPossibleGroup(next(), true);
         if (tks[0].type === TokenType.EOF){
             eReporter.complationError('argument expected', tks[0]);
             tks[0].text = '';
@@ -242,13 +244,14 @@ export function createParser(eReporter: ErrorReporter): Parser{
             return new Token(TokenType.OTHER, text, tks[1].start, tks[tks.length - 2].end, tks[0].hasWhiteSpace);
         }
     }
+    function createTrack(name: string): NodeTrack {
+        return { voices: {}, volume: 0x64, name, instrument: -1  };
+    }
 
     function parse(tkSource: ITokenSource): MidiFile{
         macroExpander.init(tkSource);
 
-        let { tracks, tempo } = parseTop();
-        let file = new MidiFile();
-        file.startTempo = tempo;
+        let { tracks, file } = parseTop();
 
         for (let name in tracks){
             file.tracks.push(convertTrack(tracks[name]));
@@ -264,16 +267,17 @@ export function createParser(eReporter: ErrorReporter): Parser{
         }
         return { 
             name: track.name, 
+            volume: track.volume,
             instrument: track.instrument, 
             events: pollAllEvents(createOverlappedEventMerger(createNoteQueue(list)))
         };
     }
 
     function parseTop(): ParserResult {
-        let ret: ParserResult = { tracks: {}, tempo: 500 };
+        let ret: ParserResult = { tracks: {}, file: new MidiFile() };
         let tracks = ret.tracks;
 
-        parseFileOptions(ret);
+        parseFileOptions(ret.file);
 
         let tk = peek();
         if (tk.type !== TokenType.EOF){
@@ -281,7 +285,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
             if (!isMacro(tk, 'track')){
                 name = 'Track 1';
                 if (!tracks.hasOwnProperty(name)){
-                    parseTrackContent(tracks[name] = { name, instrument: -1, voices: {} });
+                    parseTrackContent(tracks[name] = createTrack(name));
                 }
                 else
                     parseTrackContent(tracks[name]);
@@ -291,7 +295,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
                 next();
                 name = readArg().text;
                 if (!tracks.hasOwnProperty(name)){
-                    parseTrackContent(tracks[name] = { name, instrument: -1, voices: {} });
+                    parseTrackContent(tracks[name] = createTrack(name));
                 }
                 else
                     parseTrackContent(tracks[name]);
@@ -302,18 +306,55 @@ export function createParser(eReporter: ErrorReporter): Parser{
         return ret;
     }
 
-    function parseFileOptions(mf: ParserResult){
+    function parseTempoMacro(){
+        next();
+        let n = readArg();
+        if (regNum.test(n.text)) {
+            let tempo = Number(n.text);
+            if (tempo > 0xffffff) {
+                eReporter.complationError('Tempo value too large, should be less than 0xffffff', n);
+                return -1;
+            }
+            else
+                return tempo;
+        }
+        else {
+            eReporter.complationError('Tempo number expected', n);
+            return -1;
+        }
+    }
+
+    function parseBpmMacro(){
+        next();
+        let n = readArg();
+        if (regNum.test(n.text)){
+            let tempo = 60000000 / Number(n.text);
+            if (tempo > 0xffffff) {
+                eReporter.complationError(`Tempo value too large (${tempo}), should be less than 0xffffff`, n);
+                return -1;
+            }
+            else
+                return tempo;
+        }
+        else {
+            eReporter.complationError('BPM number expected', n);
+            return -1;
+        }
+    }
+
+    function parseFileOptions(file: MidiFile){
         let tk = peek();
         while (true){
             if (isMacro(tk, 'tempo')){
-                next();
-                let n = readArg();
-                if (regNum.test(n.text)) {
-                    let tempo = Number(n.text);
-                    if (tempo > 0xffffff)
-                        eReporter.complationError('Tempo value to large, should be less than 0xffffff', n);
-                    else
-                        mf.tempo = tempo;
+                let tempo = parseTempoMacro();
+                if (tempo !== -1){
+                    file.startTempo = tempo;
+                }
+            }
+            else if (isMacro(tk, 'bpm')){
+                let tempo = parseBpmMacro();
+                if (tempo !== -1){
+                    file.startTempo = tempo;
                 }
             }
             else

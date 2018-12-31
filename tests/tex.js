@@ -1,7 +1,7 @@
 'use strict';
 
 var assert = require('assert');
-var main = require("../");
+var main = require("../").debug;
 
 function createContext(){
     var s = '';
@@ -77,4 +77,5 @@ describe("Expanding macros", function(){
         ["Use of macro \\hkm that doesn't match its definition"]    
     );
     testExpand('Removing comments', "hkm % this will not apear in the output", ["hkm "]);
+    testExpand('A problem', '\\def\\repeat#1#2{#1#2#1} \\repeat{1}{2}', [' {{1}{2}{1}}']);
 });

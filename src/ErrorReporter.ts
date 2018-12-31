@@ -1,6 +1,6 @@
 import {Position, Range} from './Token';
 
-interface DiagnosisMsg {
+export interface DiagnosisMsg {
     msg: string;
     range: Range;
 }

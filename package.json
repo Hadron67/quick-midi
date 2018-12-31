@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Creating midi files from numbered musical notation (简谱)",
   "main": "index.js",
+  "bin": "bin/quick-midi",
   "scripts": {
     "test": "mocha tests/"
   },

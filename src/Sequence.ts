@@ -30,6 +30,20 @@
 const toneName = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const toneNum =  ['1', '1#', '2', '2#', '3', '4', '4#', '5', '5#', '6', '6#', '7'];
 const numToNote = [0, 2, 4, 5, 7, 9, 11];
+const majorKeyToSignature = [
+    0, // C 
+    7, // C# 
+    2, // D
+    -3,// Eb
+    4, // E
+    -1,// F
+    6, // F#
+    1, // G
+    -4,// Ab
+    3, // A
+    -2,// Bb
+    5, // B
+];
 
 export class Note {
     duration: number = Note.DEFLEN;
@@ -70,6 +84,15 @@ export class Note {
     static REST = 132;
     static NOTE_COUNT = 132;
     static DEFLEN = 96;
+    static shiftToKeySignature(shift: number, minor: boolean = false){
+        if (minor)
+            shift -= 3;
+        while (shift < 0)
+            shift += 12;
+        while (shift >= 12)
+            shift -= 12;
+        return majorKeyToSignature[shift];
+    }
 }
 
 export enum MidiEventType {
@@ -131,14 +154,29 @@ export function eventToString(e: MidiEvent, useNum: boolean = false){
 export interface Track {
     name: string;
     instrument: number;
+    volume: number;
     events: MidiEvent[];
+};
+
+interface TimeSignature {
+    numerator: number;
+    denominator: number;
+};
+
+interface Metronome {
+    clocks: number; // number of MIDI clocks between two metronome click, 
+    n32: number; // while there are `n32' number of 32th notes in 24 MIDI clocks.
 };
 
 export class MidiFile {
     keysig: number = 0; /* [0, 11] */
+    timesig: TimeSignature = { numerator: 4, denominator: 4 };
+    metronome: Metronome = { clocks: 24, n32: 8 };
+    minor: boolean = false;
     division: number = Note.DEFLEN;
+    startTempo: number = 500000;// bpm = 120
     tracks: Track[] = [];
-    startTempo: number = 500;
+    format: 0 | 1 | 2 = 1;
 
     dump(useNum: boolean = false): string[] {
         let ret: string[] = [`MidiFile(keysig = ${this.keysig}, division = ${this.division}, tempo = ${this.startTempo}){`];
