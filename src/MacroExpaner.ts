@@ -74,28 +74,45 @@ class TeXMacro implements Macro {
     }
 }
 
+type MacroMap = {[name: string]: Macro};
+
+enum MacroType {
+    SCOPE, GLOBAL, INTERNAL
+};
+
 class MacroSet {
-    macroStack: {[name: string]: Macro}[] = [{}];
+    macroStack: MacroMap[] = [{}];
+    internalMacros: MacroMap = {};
     getMacro(name: string): Macro{
         for (let _a = this.macroStack, i = _a.length - 1; i >= 0; i--){
-            if (_a[i][name] !== undefined)
+            if (_a[i].hasOwnProperty(name))
                 return _a[i][name];
         }
+        if (this.internalMacros.hasOwnProperty(name))
+            return this.internalMacros[name];
         return null;
     }
     reset(){
         this.macroStack = [{}];
     }
-    defineMacro(m: Macro, global: boolean = false){
-        this.macroStack[global ? 0 : (this.macroStack.length - 1)][m.name] = m;
+    defineMacro(m: Macro, type: MacroType){
+        if (type === MacroType.SCOPE){
+            this.macroStack[this.macroStack.length - 1][m.name] = m;
+        }
+        else if (type === MacroType.GLOBAL){
+            this.macroStack[0][m.name] = m;
+        }
+        else if (type === MacroType.INTERNAL){
+            this.internalMacros[m.name] = m;
+        }
         return this;
     }
-    define(name: string, run: (e: MacroExpander) => ITokenSource, global: boolean = false){
-        this.defineMacro({name, run, isMeta: false}, global);
+    define(name: string, run: (e: MacroExpander) => ITokenSource, type: MacroType){
+        this.defineMacro({name, run, isMeta: false}, type);
         return this;
     }
-    defineMeta(name: string, global: boolean = false){
-        this.defineMacro({name, run: null, isMeta: true}, global);
+    defineMeta(name: string){
+        this.defineMacro({name, run: null, isMeta: true}, MacroType.INTERNAL);
         return this;
     }
     enterScope(){
@@ -135,11 +152,11 @@ class MacroSet {
                 return null;
             }
             macro.content = e.readPossibleGroup(t, false);
-            cela.defineMacro(macro, global);
+            cela.defineMacro(macro, global ? MacroType.GLOBAL : MacroType.SCOPE);
             return null;
         }
-        this.define('\\def', e => def(e, false));
-        this.define('\\gdef', e => def(e, true));
+        this.define('\\def', e => def(e, false), MacroType.INTERNAL);
+        this.define('\\gdef', e => def(e, true), MacroType.INTERNAL);
         return this;
     }
 }
@@ -230,7 +247,7 @@ class MacroExpander implements ITokenSource {
             let ret = this._pull();
             if (expand && ret.type === TokenType.MACRO){
                 let macro = this.macros.getMacro(ret.text);
-                if (macro === null || !macro.isMeta){
+                if (macro === null || (macro !== null && !macro.isMeta)){
                     this._expand(ret, macro);
                     continue;
                 }

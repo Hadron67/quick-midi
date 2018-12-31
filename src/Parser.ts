@@ -2,7 +2,7 @@
     \c{1} {5.12}_ 233 123255 56771'1' {2321}' 7
     \c{2} 
 */
-import { Note, MidiEventType, MidiEvent, createNoteOnEvent, createNoteOffEvent, createTempoChangeEvent, MidiFile, Track } from "./Sequence";
+import { Note, MidiEventType, MidiEvent, createNoteOnEvent, createNoteOffEvent, createTempoChangeEvent, MidiFile, Track, NoteOnEvent } from "./Sequence";
 import { ITokenSource, TokenType, Token, Range } from "./Token";
 import { MacroExpander } from "./MacroExpaner";
 import { ErrorReporter } from "./ErrorReporter";
@@ -156,8 +156,10 @@ class EventNodeList {
 
                 notDiverse || this._freeChildren.push(list.tail);
             }
-            else 
-                throw 'unreachable';
+            else {
+                this._copyFrom(list);
+                this.topNode = list.topNode.parent = createModifierNode(ModifierNodeType.VIA);
+            }
         }
     }
     concat(list: EventNodeList): INodeSlot{
@@ -188,7 +190,12 @@ class EventNodeList {
 };
 
 const regDigit = /[0-9]/;
-const regNum = /[0-9]+/g;
+const regNum = /^[0-9]+$/;
+
+interface ParserResult {
+    tracks: TrackMap;
+    tempo: number;
+};
 
 export function createParser(eReporter: ErrorReporter): Parser{
     let macroExpander: MacroExpander = new MacroExpander(eReporter);
@@ -215,7 +222,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
         return macroExpander.peekToken();
     }
     function isMacro(tk: Token, name: string){
-        return tk.type === TokenType.MACRO && tk.text === name;
+        return tk.type === TokenType.MACRO && tk.text === '\\' + name;
     }
     function readArg(){
         let tks = macroExpander.readPossibleGroup(next(), false);
@@ -239,8 +246,9 @@ export function createParser(eReporter: ErrorReporter): Parser{
     function parse(tkSource: ITokenSource): MidiFile{
         macroExpander.init(tkSource);
 
-        let { tracks } = parseTop();
+        let { tracks, tempo } = parseTop();
         let file = new MidiFile();
+        file.startTempo = tempo;
 
         for (let name in tracks){
             file.tracks.push(convertTrack(tracks[name]));
@@ -257,12 +265,15 @@ export function createParser(eReporter: ErrorReporter): Parser{
         return { 
             name: track.name, 
             instrument: track.instrument, 
-            events: mergeOverlapedEvents(createNoteQueue(list))
+            events: pollAllEvents(createOverlappedEventMerger(createNoteQueue(list)))
         };
     }
 
-    function parseTop(): { tracks: TrackMap }{
-        let tracks: TrackMap = {};
+    function parseTop(): ParserResult {
+        let ret: ParserResult = { tracks: {}, tempo: 500 };
+        let tracks = ret.tracks;
+
+        parseFileOptions(ret);
 
         let tk = peek();
         if (tk.type !== TokenType.EOF){
@@ -288,7 +299,27 @@ export function createParser(eReporter: ErrorReporter): Parser{
             }
         }
 
-        return { tracks };
+        return ret;
+    }
+
+    function parseFileOptions(mf: ParserResult){
+        let tk = peek();
+        while (true){
+            if (isMacro(tk, 'tempo')){
+                next();
+                let n = readArg();
+                if (regNum.test(n.text)) {
+                    let tempo = Number(n.text);
+                    if (tempo > 0xffffff)
+                        eReporter.complationError('Tempo value to large, should be less than 0xffffff', n);
+                    else
+                        mf.tempo = tempo;
+                }
+            }
+            else
+                break;
+            tk = peek();
+        }
     }
 
     function isTrackEnd(tk: Token){
@@ -297,37 +328,46 @@ export function createParser(eReporter: ErrorReporter): Parser{
     }
 
     function parseTrackContent(track: NodeTrack){
+        parseTrackOptions(track);
         let tk = peek();
-        if (isMacro(tk, 'instrument')) {
-            next();
-            let name = readArg();
-            if (regNum.test(name.text))
-                track.instrument = Number(name.text);
-            else {
-                eReporter.complationError(`Unknown instrument number ${name.text}`, name);
-                track.instrument = 0;
-            }
-            tk = peek();
-        }
-        else {
-            track.instrument = 0;
-        }
 
         if (!isTrackEnd(tk)){
             if (!isMacro(tk, 'v')){
                 if (!track.voices['1'])
-                    track.voices['1'] = new EventNodeList();
-                track.voices['1'].concat(parseSequence());
+                    (track.voices['1'] = new EventNodeList()).concat(parseSequence());
+                else
+                    track.voices['1'].concat(parseSequence());
                 tk = peek();
             }
             while (isMacro(tk, 'v')){
                 next();
                 let name = readArg();
                 if (!track.voices[name.text])
-                    track.voices[name.text] = new EventNodeList();
-                track.voices[name.text].concat(parseSequence());
+                    (track.voices[name.text] = new EventNodeList()).concat(parseSequence());
+                else
+                    track.voices[name.text].concat(parseSequence());
                 tk = peek();
             }
+        }
+    }
+
+    function parseTrackOptions(track: NodeTrack){
+        let tk = peek();
+        track.instrument = 0;
+        while (true){
+            if (isMacro(tk, 'instrument')) {
+                next();
+                let name = readArg();
+                if (regNum.test(name.text))
+                    track.instrument = Number(name.text);
+                else {
+                    eReporter.complationError(`Unknown instrument number ${name.text}`, name);
+                    track.instrument = 0;
+                }
+                tk = peek();
+            }
+            else
+                break;
         }
     }
 
@@ -508,9 +548,11 @@ export function createNoteQueue(list: EventNodeList): ISortedNoteEventQueue{
                         queue.add({ node: null, event: createNoteOnEvent(note.note, delta, node.channel, node.velocity) });
                         queue.add({ node, event: createNoteOffEvent(note.note, delta + note.duration, node.channel, node.velocity) });
                     }
-                    else if (node.type === EventNodeType.REST && node.next && --node.next.refCount === 0){
-                        let note = getNoteFromNode(node);
-                        stack.push({ node: node.next, delta: delta + note.duration });
+                    else if (node.type === EventNodeType.REST){
+                        if (node.next && --node.next.refCount === 0){
+                            let note = getNoteFromNode(node);
+                            stack.push({ node: node.next, delta: delta + note.duration });
+                        }
                     }
                     else if (node.type === EventNodeType.TEMPO_CHANGE){
                         queue.add({ node, event: createTempoChangeEvent(node.tempo, delta, node.channel) });
@@ -543,24 +585,44 @@ export function createNoteQueue(list: EventNodeList): ISortedNoteEventQueue{
     }
 }
 
+function createMidiEventFilter(queue: ISortedNoteEventQueue, filter: (event: MidiEvent) => boolean): ISortedNoteEventQueue{
+    return {
+        pollNote(){
+            let event = queue.pollNote();
+            let delta = 0;
+            while (event && filter(event)){
+                delta += event.delta;
+                event = queue.pollNote();
+            }
+            if (event)
+                event.delta += delta;
+            return event;
+        }
+    };
+}
 
-
-function mergeOverlapedEvents(queue: ISortedNoteEventQueue): MidiEvent[]{
-    let events: MidiEvent[] = [];
+function createOverlappedEventMerger(queue: ISortedNoteEventQueue): ISortedNoteEventQueue{
     let noteRefCounts: number[] = [];
     for (let i = 0; i < Note.NOTE_COUNT; i++){
         noteRefCounts.push(0);
     }
-    let event = queue.pollNote();
-    while (event){
-        if (event.type === MidiEventType.NOTEON && noteRefCounts[event.note]++ === 0){
-            events.push(event);
+    return createMidiEventFilter(queue, event => {
+        if (event.type === MidiEventType.NOTEON) {
+            return noteRefCounts[event.note]++ !== 0;
         }
-        else if (event.type === MidiEventType.NOTEOFF && --noteRefCounts[event.note] === 0){
-            events.push(event);
+        else if (event.type === MidiEventType.NOTEOFF){
+            return --noteRefCounts[event.note] !== 0;
         }
         else
-            events.push(event);
+            return false;
+    });
+}
+
+function pollAllEvents(queue: ISortedNoteEventQueue): MidiEvent[]{
+    let events: MidiEvent[] = [];
+    let event = queue.pollNote();
+    while (event){
+        events.push(event);
         event = queue.pollNote();
     }
     return events;

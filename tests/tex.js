@@ -12,6 +12,7 @@ function createContext(){
     });
     var reporter = new main.ErrorReporter();
     var expander = new main.MacroExpander(reporter, scanner);
+    expander.macros.defineInternalMacros();
 
     return { run };
 
@@ -20,7 +21,6 @@ function createContext(){
         i = 0;
         reporter.reset();
         expander.init(scanner);
-        expander.macros.defineInternalMacros();
         var out = [];
         var t = expander.nextToken();
         var expanded = '';

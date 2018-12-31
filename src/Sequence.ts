@@ -138,4 +138,18 @@ export class MidiFile {
     keysig: number = 0; /* [0, 11] */
     division: number = Note.DEFLEN;
     tracks: Track[] = [];
+    startTempo: number = 500;
+
+    dump(useNum: boolean = false): string[] {
+        let ret: string[] = [`MidiFile(keysig = ${this.keysig}, division = ${this.division}, tempo = ${this.startTempo}){`];
+        for (let track of this.tracks){
+            ret.push(`    Track(name = "${track.name}", instrument = ${track.instrument}){`);
+            for (let event of track.events){
+                ret.push('        ' + eventToString(event, useNum));
+            }
+            ret.push('    }');
+        }
+        ret.push('}');
+        return ret;
+    }
 };
