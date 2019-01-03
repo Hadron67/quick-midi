@@ -41,6 +41,7 @@ class Tester {
         this.out = [];
 
         this._indents = 0;
+        this._posts = [];
     }
     _indent(){
         return ' '.repeat(this._indents << 2);
@@ -72,11 +73,17 @@ class Tester {
     keySignatureChange(shift, minor, delta){
         this.out.push(`${this._indent()}KeySignatureChange(delta = ${delta}, shift = ${shift}, minor = ${minor})`);
     }
+    timeSignatureChange(n, d){
+        this.out.push(`${this._indent()}TimeSignatureChange(sig = ${n} / ${d})`);
+    }
     raw(text){
         this.out.push(this._indent() + text);
     }
     check(out){
         assert.deepStrictEqual(out, this.out);
+    }
+    post(cb){
+        this._posts.push(cb);
     }
 };
 function test(dest, input, expectFunc){
@@ -317,6 +324,27 @@ describe('Sequencing with numbered musical notation', function(){
         note(t, '4-4', 1);
         t.velocity = 120;
         note(t, '5-4', 1);
+        
+        t.end();
+        t.end();
+    });
+    test('Change time signature', '\\times34 1231 \\times68 {1231 3453}_', t => {
+        t.beginFile(0, Note.DEFLEN, deftempo);
+        t.beginTrack('Track 1', 0);
+
+        note(t, '1-4', 1);
+        note(t, '2-4', 1);
+        note(t, '3-4', 1);
+        note(t, '1-4', 1);
+        t.timeSignatureChange(6, 8);
+        note(t, '1-4', 0.5);
+        note(t, '2-4', 0.5);
+        note(t, '3-4', 0.5);
+        note(t, '1-4', 0.5);
+        note(t, '3-4', 0.5);
+        note(t, '4-4', 0.5);
+        note(t, '5-4', 0.5);
+        note(t, '3-4', 0.5);
         
         t.end();
         t.end();

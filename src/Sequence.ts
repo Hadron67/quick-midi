@@ -96,7 +96,7 @@ export class Note {
 }
 
 export enum MidiEventType {
-    NOTEON, NOTEOFF, TEMPO_CHANGE, KEY_SIGNATURE_CHANGE
+    NOTEON, NOTEOFF, TEMPO_CHANGE, KEY_SIGNATURE_CHANGE, TIME_SIGNATURE_CHANGE
 };
 
 export interface MidiEventBase {
@@ -129,7 +129,12 @@ export interface KeySignatureChangeEvent extends MidiEventBase {
     minor: boolean;
 };
 
-export type MidiEvent = NoteOnEvent | NoteOffEvent | TempoChangeEvent | KeySignatureChangeEvent;
+export interface TimeSignatureChangeEvent extends MidiEventBase {
+    type: MidiEventType.TIME_SIGNATURE_CHANGE;
+    sig: TimeSignature;
+};
+
+export type MidiEvent = NoteOnEvent | NoteOffEvent | TempoChangeEvent | KeySignatureChangeEvent | TimeSignatureChangeEvent;
 
 export function createNoteOnEvent(note: number, delta: number, channel: number, velocity: number): NoteOnEvent{
     return { type: MidiEventType.NOTEON, delta, note, channel, velocity };
@@ -147,6 +152,10 @@ export function createKeySignatureChangeEvent(shift: number, minor: boolean, del
     return { type: MidiEventType.KEY_SIGNATURE_CHANGE, shift, minor, delta };
 }
 
+export function createTimeSignatureChangeEvent(sig: TimeSignature, delta: number): TimeSignatureChangeEvent{
+    return { type: MidiEventType.TIME_SIGNATURE_CHANGE, delta, sig };
+}
+
 export function eventToString(e: MidiEvent, useNum: boolean = false){
     let note = '';
     const n: string[] = useNum ? toneNum : toneName;
@@ -159,6 +168,8 @@ export function eventToString(e: MidiEvent, useNum: boolean = false){
             return `TempoChange(delta = ${e.delta}, tempo = ${e.tempo})`;
         case MidiEventType.KEY_SIGNATURE_CHANGE:
             return `KeySignatureChange(delta = ${e.delta}, shift = ${e.shift}, minor = ${e.minor})`;
+        case MidiEventType.TIME_SIGNATURE_CHANGE:
+            return `TimeSignatureChange(sig = ${e.sig.numerator} / ${e.sig.denominator})`;
         default:
             throw new Error('unreachable');
     }
@@ -176,7 +187,7 @@ export interface TimeSignature {
     denominator: number;
 };
 
-interface Metronome {
+export interface Metronome {
     clocks: number; // number of MIDI clocks between two metronome click, 
     n32: number; // while there are `n32' number of 32th notes in 24 MIDI clocks.
 };

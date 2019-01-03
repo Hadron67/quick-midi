@@ -2,7 +2,7 @@
     \c{1} {5.12}_ 233 123255 56771'1' {2321}' 7
     \c{2} 
 */
-import { Note, MidiEventType, MidiEvent, createNoteOnEvent, createNoteOffEvent, createTempoChangeEvent, MidiFile, Track, NoteOnEvent, createKeySignatureChangeEvent, TimeSignature } from "./Sequence";
+import { Note, MidiEventType, MidiEvent, createNoteOnEvent, createNoteOffEvent, createTempoChangeEvent, MidiFile, Track, NoteOnEvent, createKeySignatureChangeEvent, TimeSignature, createTimeSignatureChangeEvent } from "./Sequence";
 import { ITokenSource, TokenType, Token, Range } from "./Token";
 import { MacroExpander } from "./MacroExpaner";
 import { ErrorReporter } from "./ErrorReporter";
@@ -41,7 +41,7 @@ interface ModifierNode {
 };
 
 enum EventNodeType {
-    NOTE, REST, TEMPO_CHANGE, KEY_SIGNATURE_CHANGE
+    NOTE, REST, TEMPO_CHANGE, KEY_SIGNATURE_CHANGE, TIME_SIGNATURE_CHANGE
 };
 
 interface EventNodeBase {
@@ -75,7 +75,12 @@ interface KeySignatureChangeNode extends EventNodeBase {
     minor: boolean;
 };
 
-type EventNode = NoteEventNode | TempoChangeEventNode | RestEventNode | KeySignatureChangeNode;
+interface TimeSignatureChangeNode extends EventNodeBase {
+    type: EventNodeType.TIME_SIGNATURE_CHANGE;
+    sig: TimeSignature;
+};
+
+type EventNode = NoteEventNode | TempoChangeEventNode | RestEventNode | KeySignatureChangeNode | TimeSignatureChangeNode;
 
 function createNoteNode(note: number, velocity: number, channel: number, pos: Range): NoteEventNode{
     return { type: EventNodeType.NOTE, next: null, sibling: null, parent: null, note, pos, velocity, channel, refCount: 1 };
@@ -94,6 +99,9 @@ function createKeySignatureChangeNode(pos: Range, shift: number, minor: boolean)
 }
 function createTempoChangeNode(pos: Range, tempo: number): TempoChangeEventNode {
     return { type: EventNodeType.TEMPO_CHANGE, next: null, sibling: null, parent: null, pos, tempo, refCount: 1 };
+}
+function createTimeSignatureChangeNode(pos: Range, sig: TimeSignature): TimeSignatureChangeNode {
+    return { type: EventNodeType.TIME_SIGNATURE_CHANGE, next: null, sibling: null, parent: null, pos, sig, refCount: 1 };
 }
 
 interface INodeSlot {
@@ -264,7 +272,8 @@ export function createParser(eReporter: ErrorReporter): Parser{
     .defineMeta('\\major')
     .defineMeta('\\minor')
     .defineMeta('\\vel')
-    .defineMeta('\\times');
+    .defineMeta('\\times')
+    .defineMeta('\\div');
     
     return { 
         parse
@@ -479,6 +488,12 @@ export function createParser(eReporter: ErrorReporter): Parser{
                     file.minor = sig.minor;
                 }
             }
+            else if (isMacro(tk, 'times')){
+                let s = parseTimeSignatureMacro();
+                if (s){
+                    file.timesig = s;
+                }
+            }
             else
                 break;
             tk = peek();
@@ -634,6 +649,14 @@ export function createParser(eReporter: ErrorReporter): Parser{
             }
             return null;
         }
+        else if (isMacro(tk, 'times')){
+            let s = parseTimeSignatureMacro();
+            if (s){
+                return createTimeSignatureChangeNode(tk, s);
+            }
+            else
+                return null;
+        }
         else {
             throw new Error(`Unreachable: Unimplemented directive ${tk.text}`);
         }
@@ -782,6 +805,9 @@ export function createNoteQueue(list: EventNodeList): ISortedNoteEventQueue{
                     }
                     else if (node.type === EventNodeType.TEMPO_CHANGE){
                         queue.add({ node, event: createTempoChangeEvent(node.tempo, delta) });
+                    }
+                    else if (node.type === EventNodeType.TIME_SIGNATURE_CHANGE){
+                        queue.add({ node, event: createTimeSignatureChangeEvent(node.sig, delta) });
                     }
                     else
                         throw new Error('unreachable');

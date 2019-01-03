@@ -1,4 +1,4 @@
-import { MidiFile, Note, Track, MidiEventType } from "./Sequence";
+import { MidiFile, Note, Track, MidiEventType, TimeSignature, Metronome } from "./Sequence";
 
 class Chunk {
     data: number[] = [];
@@ -69,6 +69,19 @@ class Chunk {
     endChunk(){
         this.writeUInt32At(this.data.length - this._lastPos - 4, this._lastPos);
     }
+
+    writeTempoEvent(tempo: number){
+        this.writeBytes([0xFF, 0x51, 0x03, (tempo >>> 16) & 0xff, (tempo >>> 8) & 0xff, (tempo) & 0xff]);
+    }
+    writeKeySignatureEvent(shift: number, minor: boolean){
+        this.writeBytes([0xFF, 0x59, 0x02, Note.shiftToKeySignature(shift, minor), minor ? 1 : 0]);
+    }
+    writeTimeSignatureEvent(sig: TimeSignature, metronome: Metronome){
+        this.writeBytes([0xFF, 0x58, 0x04, sig.numerator, log2(sig.denominator), metronome.clocks, metronome.n32]);
+    }
+    writeEndOfTrack(){
+        this.writeBytes([0x1, 0xFF, 0x2F, 0x00]);
+    }
 };
 
 function writeHeaderChunk(file: MidiFile, chunk: Chunk){
@@ -90,13 +103,17 @@ function log2(n: number): number{
 
 function writeMetaEvents(file: MidiFile, chunk: Chunk){
     // Set tempo
-    chunk.writeBytes([0x0, 0xFF, 0x51, 0x03, (file.startTempo >>> 16) & 0xff, (file.startTempo >>> 8) & 0xff, (file.startTempo) & 0xff]);
+    // chunk.writeBytes([0x0, 0xFF, 0x51, 0x03, (file.startTempo >>> 16) & 0xff, (file.startTempo >>> 8) & 0xff, (file.startTempo) & 0xff]);
+    chunk.writeVarInt(0).writeTempoEvent(file.startTempo);
     // Key signature
-    chunk.writeBytes([0x0, 0xFF, 0x59, 0x02, Note.shiftToKeySignature(file.keysig, file.minor), file.minor ? 1 : 0]);
+    // chunk.writeBytes([0x0, 0xFF, 0x59, 0x02, Note.shiftToKeySignature(file.keysig, file.minor), file.minor ? 1 : 0]);
+    chunk.writeVarInt(0).writeKeySignatureEvent(file.keysig, file.minor);
     // Time signature
-    chunk.writeBytes([0x0, 0xFF, 0x58, 0x04, file.timesig.numerator, log2(file.timesig.denominator), file.metronome.clocks, file.metronome.n32]);
+    // chunk.writeBytes([0x0, 0xFF, 0x58, 0x04, file.timesig.numerator, log2(file.timesig.denominator), file.metronome.clocks, file.metronome.n32]);
+    chunk.writeVarInt(0).writeTimeSignatureEvent(file.timesig, file.metronome);
     // EOT
-    chunk.writeBytes([0x1, 0xFF, 0x2F, 0x00]);
+    // chunk.writeBytes([0x1, 0xFF, 0x2F, 0x00]);
+    chunk.writeEndOfTrack();
 }
 
 function writeTrackMetaEvents(file: MidiFile, track: Track, channel: number, chunk: Chunk){
@@ -123,10 +140,15 @@ function writeTrackEvents(file: MidiFile, track: Track, chunk: Chunk){
                 chunk.writeBytes([0x80 | event.channel, event.note, 0]);
                 break;
             case MidiEventType.TEMPO_CHANGE:
-                chunk.writeBytes([0xFF, 0x51, 0x03, (file.startTempo >>> 16) & 0xff, (file.startTempo >>> 8) & 0xff, (file.startTempo) & 0xff]);
+                chunk.writeTempoEvent(event.tempo);
+                // chunk.writeBytes([0xFF, 0x51, 0x03, (file.startTempo >>> 16) & 0xff, (file.startTempo >>> 8) & 0xff, (file.startTempo) & 0xff]);
                 break;
             case MidiEventType.KEY_SIGNATURE_CHANGE:
-                chunk.writeBytes([0xFF, 0x59, 0x02, Note.shiftToKeySignature(event.shift, event.minor), event.minor ? 1 : 0]);
+                chunk.writeKeySignatureEvent(event.shift, event.minor);
+                // chunk.writeBytes([0xFF, 0x59, 0x02, Note.shiftToKeySignature(event.shift, event.minor), event.minor ? 1 : 0]);
+                break;
+            case MidiEventType.TIME_SIGNATURE_CHANGE:
+                chunk.writeTimeSignatureEvent(event.sig, file.metronome);
                 break;
             default:
                 throw new Error(`Unimplemented event ${MidiEventType[(event as any).type]}`);

@@ -4,7 +4,7 @@ QMIDI = ../bin/quick-midi
 
 all: $(MIDIS)
 
-%.mid: %.txt
+%.mid: %.txt ../dist/quick-midi.js ../bin/cli.js
 	$(QMIDI) -f $< -o $@
 
 clean:
