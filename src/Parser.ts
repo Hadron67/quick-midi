@@ -2,7 +2,7 @@
     \c{1} {5.12}_ 233 123255 56771'1' {2321}' 7
     \c{2} 
 */
-import { Note, MidiEventType, MidiEvent, createNoteOnEvent, createNoteOffEvent, createTempoChangeEvent, MidiFile, Track, NoteOnEvent } from "./Sequence";
+import { Note, MidiEventType, MidiEvent, createNoteOnEvent, createNoteOffEvent, createTempoChangeEvent, MidiFile, Track, NoteOnEvent, createKeySignatureChangeEvent, TimeSignature } from "./Sequence";
 import { ITokenSource, TokenType, Token, Range } from "./Token";
 import { MacroExpander } from "./MacroExpaner";
 import { ErrorReporter } from "./ErrorReporter";
@@ -41,7 +41,7 @@ interface ModifierNode {
 };
 
 enum EventNodeType {
-    NOTE, REST, TEMPO_CHANGE
+    NOTE, REST, TEMPO_CHANGE, KEY_SIGNATURE_CHANGE
 };
 
 interface EventNodeBase {
@@ -51,13 +51,13 @@ interface EventNodeBase {
     parent: ModifierNode;
     pos: Range;
     refCount: number;
-    channel: number;
 }
 
 interface NoteEventNode extends EventNodeBase {
     type: EventNodeType.NOTE;
     note: number;
     velocity: number;
+    channel: number;
 }
 
 interface TempoChangeEventNode extends EventNodeBase {
@@ -69,10 +69,16 @@ interface RestEventNode extends EventNodeBase {
     type: EventNodeType.REST;
 };
 
-type EventNode = NoteEventNode | TempoChangeEventNode | RestEventNode;
+interface KeySignatureChangeNode extends EventNodeBase {
+    type: EventNodeType.KEY_SIGNATURE_CHANGE;
+    shift: number;
+    minor: boolean;
+};
 
-function createNoteNode(note: number, velocity: number, pos: Range): NoteEventNode{
-    return { type: EventNodeType.NOTE, next: null, sibling: null, parent: null, note, pos, velocity, channel: 0, refCount: 1 };
+type EventNode = NoteEventNode | TempoChangeEventNode | RestEventNode | KeySignatureChangeNode;
+
+function createNoteNode(note: number, velocity: number, channel: number, pos: Range): NoteEventNode{
+    return { type: EventNodeType.NOTE, next: null, sibling: null, parent: null, note, pos, velocity, channel, refCount: 1 };
 }
 function createModifierNode(type: ModifierNodeType, pos: Range = null): ModifierNode{
     return { parent: null, type, pos };
@@ -81,7 +87,13 @@ function createModifierNodeWithVal(type: ModifierNodeType, pos: Range, val: numb
     return { type, parent: null, pos, val };
 }
 function createRestEventNode(pos: Range): RestEventNode{
-    return { type: EventNodeType.REST, next: null, sibling: null, parent: null, pos, refCount: 1, channel: 0 };
+    return { type: EventNodeType.REST, next: null, sibling: null, parent: null, pos, refCount: 1 };
+}
+function createKeySignatureChangeNode(pos: Range, shift: number, minor: boolean): KeySignatureChangeNode{
+    return { type: EventNodeType.KEY_SIGNATURE_CHANGE, next: null, sibling: null, parent: null, pos, shift, minor, refCount: 1 };
+}
+function createTempoChangeNode(pos: Range, tempo: number): TempoChangeEventNode {
+    return { type: EventNodeType.TEMPO_CHANGE, next: null, sibling: null, parent: null, pos, tempo, refCount: 1 };
 }
 
 interface INodeSlot {
@@ -90,13 +102,22 @@ interface INodeSlot {
 
 const dummyNodeSlot: INodeSlot = { insertNode(node){} };
 
-type VoiceMap = {[name: string]: EventNodeList};
+interface Voice {
+    events: EventNodeList;
+    ctx: ParserContext;
+    channel: number;
+};
+
+type VoiceMap = {[name: string]: Voice};
 
 interface NodeTrack {
     name: string;
     instrument: number;
     volume: number;
     voices: VoiceMap;
+    channel: number;
+
+    shift: number;
 };
 
 type TrackMap = {[name: string]: NodeTrack};
@@ -192,25 +213,58 @@ class EventNodeList {
 
 const regDigit = /[0-9]/;
 const regNum = /^[0-9]+$/;
+const majorKeyNameToShift: {[name: string]: number} = {
+    'Cb': -1,
+    'C': 0,
+    'C#': 1,
+    'Db': 1,
+    'D': 2,
+    'D#': 3,
+    'Eb': 3,
+    'E': 4,
+    'E#': 5,
+    'F': 5,
+    'F#': 6,
+    'Gb': 6,
+    'G': 7,
+    'G#': 8,
+    'Ab': -4,
+    'A': -3,
+    'A#': -2,
+    'Bb': -2,
+    'B': -1,
+    'B#': 0,
+};
 
 interface ParserResult {
     tracks: TrackMap;
     file: MidiFile;
 };
 
+interface ParserContext {
+    octave: number;
+    velocity: number;
+    shift: number;
+    channel: number;
+};
+
 export function createParser(eReporter: ErrorReporter): Parser{
     let macroExpander: MacroExpander = new MacroExpander(eReporter);
     let defaultOctave = 4;
     let velocity = 80;
+    let ctx: ParserContext[] = [];
 
     macroExpander.macros
     .defineInternalMacros()
     .defineMeta('\\tempo')
-    .defineMeta('\\keysig')
     .defineMeta('\\track')
     .defineMeta('\\v')
     .defineMeta('\\instrument')
-    .defineMeta('\\bpm');
+    .defineMeta('\\bpm')
+    .defineMeta('\\major')
+    .defineMeta('\\minor')
+    .defineMeta('\\vel')
+    .defineMeta('\\times');
     
     return { 
         parse
@@ -244,12 +298,47 @@ export function createParser(eReporter: ErrorReporter): Parser{
             return new Token(TokenType.OTHER, text, tks[1].start, tks[tks.length - 2].end, tks[0].hasWhiteSpace);
         }
     }
-    function createTrack(name: string): NodeTrack {
-        return { voices: {}, volume: 0x64, name, instrument: -1  };
+    function readNumber(){
+        let num = readArg();
+        if (regNum.test(num.text)){
+            return num;
+        }
+        else {
+            eReporter.complationError('Number expected', num);
+            return null;
+        }
+    }
+    function createTrack(name: string, channel: number, file: MidiFile): NodeTrack {
+        return { voices: {}, volume: 0x64, name, instrument: -1, shift: file.keysig, channel  };
+    }
+    function createDefaultContext(file: MidiFile, channel: number): ParserContext{
+        return { velocity: 80, octave: 4, shift: file.keysig, channel };
+    }
+    function createVoice(file: MidiFile, channel: number): Voice {
+        return { channel, ctx: createDefaultContext(file, channel), events: new EventNodeList() };
+    }
+    function enterScope(nctx?: ParserContext){
+        let t: ParserContext;
+        if (nctx) {
+            ctx.push(nctx);
+            return nctx;
+        }
+        else {
+            t = scopeTop();
+            ctx.push(t = { velocity: t.velocity, octave: t.octave, shift: t.shift, channel: t.channel });
+            return t;
+        }
+    }
+    function leaveScope(){
+        ctx.pop();
+    }
+    function scopeTop(){
+        return ctx[ctx.length - 1];
     }
 
     function parse(tkSource: ITokenSource): MidiFile{
         macroExpander.init(tkSource);
+        ctx.length = 0;
 
         let { tracks, file } = parseTop();
 
@@ -263,7 +352,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
     function convertTrack(track: NodeTrack): Track {
         let list = new EventNodeList();
         for (let l in track.voices){
-            list.appendChild(track.voices[l], true);
+            list.appendChild(track.voices[l].events, true);
         }
         return { 
             name: track.name, 
@@ -276,6 +365,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
     function parseTop(): ParserResult {
         let ret: ParserResult = { tracks: {}, file: new MidiFile() };
         let tracks = ret.tracks;
+        let trackCount = 0;
 
         parseFileOptions(ret.file);
 
@@ -285,20 +375,20 @@ export function createParser(eReporter: ErrorReporter): Parser{
             if (!isMacro(tk, 'track')){
                 name = 'Track 1';
                 if (!tracks.hasOwnProperty(name)){
-                    parseTrackContent(tracks[name] = createTrack(name));
+                    parseTrackContent(ret.file, tracks[name] = createTrack(name, trackCount++, ret.file));
                 }
                 else
-                    parseTrackContent(tracks[name]);
+                    parseTrackContent(ret.file, tracks[name]);
                 tk = peek();
             }
             while (isMacro(tk, 'track')){
                 next();
                 name = readArg().text;
                 if (!tracks.hasOwnProperty(name)){
-                    parseTrackContent(tracks[name] = createTrack(name));
+                    parseTrackContent(ret.file, tracks[name] = createTrack(name, trackCount++, ret.file));
                 }
                 else
-                    parseTrackContent(tracks[name]);
+                    parseTrackContent(ret.file, tracks[name]);
                 tk = peek();
             }
         }
@@ -308,8 +398,8 @@ export function createParser(eReporter: ErrorReporter): Parser{
 
     function parseTempoMacro(){
         next();
-        let n = readArg();
-        if (regNum.test(n.text)) {
+        let n = readNumber();
+        if (n) {
             let tempo = Number(n.text);
             if (tempo > 0xffffff) {
                 eReporter.complationError('Tempo value too large, should be less than 0xffffff', n);
@@ -319,7 +409,6 @@ export function createParser(eReporter: ErrorReporter): Parser{
                 return tempo;
         }
         else {
-            eReporter.complationError('Tempo number expected', n);
             return -1;
         }
     }
@@ -342,6 +431,32 @@ export function createParser(eReporter: ErrorReporter): Parser{
         }
     }
 
+    function parseTimeSignatureMacro(): TimeSignature {
+        next();
+        let numerator = readNumber();
+        let denominator = readNumber();
+        if (numerator !== null && denominator !== null){
+            return { numerator: Number(numerator.text), denominator: Number(denominator.text) };
+        }
+        else {
+            return null;
+        }
+    }
+
+    function parseMajorOrMinorMacro(): { shift: number, minor: boolean } {
+        let minor = isMacro(next(), 'minor');
+        let keyName = readArg();
+        if (majorKeyNameToShift.hasOwnProperty(keyName.text)){
+            let shift = majorKeyNameToShift[keyName.text];
+            minor && (shift -= 3);
+            return { shift, minor };
+        }
+        else {
+            eReporter.complationError(`Unknwon key signature name ${keyName.text}`, keyName);
+            return null;
+        }
+    }
+
     function parseFileOptions(file: MidiFile){
         let tk = peek();
         while (true){
@@ -357,6 +472,13 @@ export function createParser(eReporter: ErrorReporter): Parser{
                     file.startTempo = tempo;
                 }
             }
+            else if (isMacro(tk, 'major') || isMacro(tk, 'minor')){
+                let sig = parseMajorOrMinorMacro();
+                if (sig){
+                    file.keysig = sig.shift;
+                    file.minor = sig.minor;
+                }
+            }
             else
                 break;
             tk = peek();
@@ -368,25 +490,32 @@ export function createParser(eReporter: ErrorReporter): Parser{
         isMacro(tk, 'track');
     }
 
-    function parseTrackContent(track: NodeTrack){
+    function parseVoice(file: MidiFile, track: NodeTrack, name: string){
+        let v: Voice;
+        if (track.voices.hasOwnProperty(name)){
+            v = track.voices[name];
+        }
+        else {
+            v = track.voices[name] = createVoice(file, track.channel);
+        }
+        enterScope(v.ctx);
+        v.events.concat(parseSequence());
+        leaveScope();
+    }
+
+    function parseTrackContent(file: MidiFile, track: NodeTrack){
         parseTrackOptions(track);
         let tk = peek();
 
         if (!isTrackEnd(tk)){
             if (!isMacro(tk, 'v')){
-                if (!track.voices['1'])
-                    (track.voices['1'] = new EventNodeList()).concat(parseSequence());
-                else
-                    track.voices['1'].concat(parseSequence());
+                parseVoice(file, track, '1');
                 tk = peek();
             }
             while (isMacro(tk, 'v')){
                 next();
                 let name = readArg();
-                if (!track.voices[name.text])
-                    (track.voices[name.text] = new EventNodeList()).concat(parseSequence());
-                else
-                    track.voices[name.text].concat(parseSequence());
+                parseVoice(file, track, name.text);
                 tk = peek();
             }
         }
@@ -417,11 +546,15 @@ export function createParser(eReporter: ErrorReporter): Parser{
      */
     function parseGroup(): EventNodeList {
         next();
+        enterScope();
         let list = parseSequence();
+        leaveScope();
         let tk = peek();
         while (tk.type !== TokenType.EOF && tk.text === '|'){
             next();
+            enterScope();
             list.appendChild(parseSequence());
+            leaveScope();
             tk = peek();
         }
         if (next().type !== TokenType.EGROUP){
@@ -449,6 +582,10 @@ export function createParser(eReporter: ErrorReporter): Parser{
                 let group = parseGroup();
                 slot = list.concat(group);
             }
+            else if (tk.type === TokenType.MACRO){
+                let node = parseDirective();
+                node && list.append(node);
+            }
             else {
                 slot = list.append(parseNote(tk));
             }
@@ -458,25 +595,70 @@ export function createParser(eReporter: ErrorReporter): Parser{
         return list;
     }
 
-    function parseNote(tk: Token): EventNode{
+    function parseDirective(): EventNode {
+        let tk = peek();
+        let top = scopeTop();
+        if (isMacro(tk, 'minor') || isMacro(tk, 'major')){
+            let k = parseMajorOrMinorMacro();
+            if (k !== null){
+                top.shift = k.shift;
+                return createKeySignatureChangeNode(tk, k.shift, k.minor);
+            }
+        }
+        else if (isMacro(tk, 'bpm')){
+            let bpm = parseBpmMacro();
+            if (bpm !== -1){
+                return createTempoChangeNode(tk, bpm);
+            }
+            else 
+                return null;
+        }
+        else if (isMacro(tk, 'tempo')){
+            let tempo = parseTempoMacro();
+            if (tempo !== -1)
+                return createTempoChangeNode(tk, tempo);
+            else
+                return null;
+        }
+        else if (isMacro(tk, 'vel')){
+            next();
+            let n = readNumber();
+            if (n){
+                let vel = Number(n.text);
+                if (vel > 0x7f){
+                    eReporter.complationError('Velocity value too large, it should be less than 127', n);
+                }
+                else {
+                    top.velocity = vel;
+                }
+            }
+            return null;
+        }
+        else {
+            throw new Error(`Unreachable: Unimplemented directive ${tk.text}`);
+        }
+    }
+
+    function parseNote(tk: Token): NoteEventNode | RestEventNode {
+        let top = scopeTop();
         if (regDigit.test(tk.text)){
             next();
             let n = Number(tk.text);
             if (n >= 1 && n <= 7){
-                return createNoteNode(Note.numberToNote(n, defaultOctave), velocity,tk);
+                return createNoteNode(Note.numberToNote(n, top.octave) + top.shift, top.velocity, top.channel, tk);
             }
             else if (n === 0){
                 return createRestEventNode(tk);
             }
             else {
                 eReporter.complationError(`Unknown note "${n}", valid notes are 0-7`, tk);
-                return createNoteNode(-1, 0, tk);
+                return createNoteNode(-1, 0, 0, tk);
             }
         }
         else {
             next();
             eReporter.complationError('Note expected', tk);
-            return createNoteNode(-1, 0, tk);
+            return createNoteNode(-1, 0, 0, tk);
         }
     }
     
@@ -595,8 +777,11 @@ export function createNoteQueue(list: EventNodeList): ISortedNoteEventQueue{
                             stack.push({ node: node.next, delta: delta + note.duration });
                         }
                     }
+                    else if (node.type === EventNodeType.KEY_SIGNATURE_CHANGE){
+                        queue.add({ node, event: createKeySignatureChangeEvent(node.shift, node.minor, delta)});
+                    }
                     else if (node.type === EventNodeType.TEMPO_CHANGE){
-                        queue.add({ node, event: createTempoChangeEvent(node.tempo, delta, node.channel) });
+                        queue.add({ node, event: createTempoChangeEvent(node.tempo, delta) });
                     }
                     else
                         throw new Error('unreachable');

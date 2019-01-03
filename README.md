@@ -32,6 +32,27 @@ Happy new year
 1
 ```
 
-### Notes and modifiers
-Basically, the input string consists a sequence of notes and directives. Each notes could be followed by some modifiers, modifying
+### Structure
+The input consists several tracks, each track consists several voices, and the voices are sequences of sound notes. Tracks and 
+voices are indicated by directives, specifying their names.
+```
+\track{<track's name>}
+\v{<voice's name>} ... <note sequence> ...
+\v{<voice's name>} ... <note sequence> ...
+
+\track{<track's name>}
+\v{<voice's name>} ... <note sequence> ...
+\v{<voice's name>} ... <note sequence> ...
+
+...
+```
+When a track or voice appears for the first time, they'll be created, and when they appear again later in the input, the content
+will be appended to the existing one. This allows one to seperate a track or voices into several parts, making the input more
+readable.
+
+For simplicity, the first track of the input and first voices of a track can appear directly, without `\v` or `\track` directive, 
+in which case their names will be assigned as `Track 1` and `1` respectively. Thus a single sequence input is legal.
+
+### Note sequences and modifiers
+Basically, the note sequence consists of sound notes and directives. Each notes could be followed by some modifiers, modifying
 their tone and durations.

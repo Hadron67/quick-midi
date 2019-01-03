@@ -6,7 +6,7 @@ interface ISource {
 }
 
 const regWhiteSpace = /[ \t\r\n]/;
-const regName = /[a-zA-Z0-9$]/;
+const regName = /[a-zA-Z]/;
 const regDigit = /[0-9]/;
 
 class Scanner implements ITokenSource {

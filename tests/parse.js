@@ -67,7 +67,10 @@ class Tester {
     }
     tempo(tempo, delta){
         delta = (delta * Note.DEFLEN) | 0;
-        this.out.push(`${this._indent()}TempoChange(channel = ${this.channel}, delta = ${delta}, tempo = ${this.tempo})`);
+        this.out.push(`${this._indent()}TempoChange(delta = ${delta}, tempo = ${tempo})`);
+    }
+    keySignatureChange(shift, minor, delta){
+        this.out.push(`${this._indent()}KeySignatureChange(delta = ${delta}, shift = ${shift}, minor = ${minor})`);
     }
     raw(text){
         this.out.push(this._indent() + text);
@@ -87,6 +90,10 @@ function test(dest, input, expectFunc){
 describe('Sequencing with numbered musical notation', function(){
     this.timeout(200);
     var deftempo = 500000;
+    function note(t, n, delta){
+        t.noteOn (n, 0);
+        t.noteOff(n, delta);
+    }
     test('Empty input', '{}  {}#---- {{}{}-}__', t => {
         t.beginFile(0, Note.DEFLEN, deftempo);
         t.beginTrack('Track 1', 0);
@@ -240,17 +247,78 @@ describe('Sequencing with numbered musical notation', function(){
         t.beginFile(0, Note.DEFLEN, 1000);
 
         t.beginTrack('Piano1', 2);
+        t.channel = 0;
         oneTrack(0);
         t.end();
 
         t.beginTrack('Piano2', 2);
+        t.channel = 1;
         oneTrack(2);
         t.end();
 
         t.beginTrack('Piano3', 2);
+        t.channel = 2;
         oneTrack(4);
         t.end();
 
+        t.end();
+    });
+
+    test('Key signature changes', '\\major{F} 12315', t =>{
+        t.beginFile(5, Note.DEFLEN, deftempo);
+        t.beginTrack('Track 1', 0);
+
+        note(t, '4-4', 1);
+        note(t, '5-4', 1);
+        note(t, '6-4', 1);
+        note(t, '4-4', 1);
+        note(t, '1-5', 1);
+        
+        t.end();
+        t.end();
+    });
+    test('Key signature scoped changes', '\\major{G} {\\major{C} 123}1', t => {
+        t.beginFile(7, Note.DEFLEN, deftempo);
+        t.beginTrack('Track 1', 0);
+
+        t.keySignatureChange(0, false, 0);
+        note(t, '1-4', 1);
+        note(t, '2-4', 1);
+        note(t, '3-4', 1);
+        note(t, '5-4', 1);
+        
+        t.end();
+        t.end();
+    });
+    test('Change tempo', '123 \\tempo{240} 45', t => {
+        t.beginFile(0, Note.DEFLEN, deftempo);
+        t.beginTrack('Track 1', 0);
+
+        note(t, '1-4', 1);
+        note(t, '2-4', 1);
+        note(t, '3-4', 1);
+        t.tempo(240, 0);
+        note(t, '4-4', 1);
+        note(t, '5-4', 1);
+        
+        t.end();
+        t.end();
+    });
+    test('Change velocity', '1 \\vel{100} 2 \\vel{120} 3 {\\vel{80} 4 } 5', t => {
+        t.beginFile(0, Note.DEFLEN, deftempo);
+        t.beginTrack('Track 1', 0);
+
+        note(t, '1-4', 1);
+        t.velocity = 100;
+        note(t, '2-4', 1);
+        t.velocity = 120;
+        note(t, '3-4', 1);
+        t.velocity = 80;
+        note(t, '4-4', 1);
+        t.velocity = 120;
+        note(t, '5-4', 1);
+        
+        t.end();
         t.end();
     });
 });

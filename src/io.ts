@@ -81,7 +81,7 @@ function writeHeaderChunk(file: MidiFile, chunk: Chunk){
 
 function log2(n: number): number{
     let i = 0;
-    while (n > 0) {
+    while (n >= 2) {
         n >>= 1;
         i++;
     }
@@ -112,18 +112,21 @@ function writeTrackMetaEvents(file: MidiFile, track: Track, channel: number, chu
     }
 }
 
-function writeTrackEvents(file: MidiFile, track: Track, channel: number, chunk: Chunk){
+function writeTrackEvents(file: MidiFile, track: Track, chunk: Chunk){
     for (let event of track.events){
         chunk.writeVarInt(event.delta);
         switch (event.type){
             case MidiEventType.NOTEON:
-                chunk.writeBytes([0x90 | channel, event.note, event.velocity]);
+                chunk.writeBytes([0x90 | event.channel, event.note, event.velocity]);
                 break;
             case MidiEventType.NOTEOFF:
-                chunk.writeBytes([0x80 | channel, event.note, 0]);
+                chunk.writeBytes([0x80 | event.channel, event.note, 0]);
                 break;
             case MidiEventType.TEMPO_CHANGE:
                 chunk.writeBytes([0xFF, 0x51, 0x03, (file.startTempo >>> 16) & 0xff, (file.startTempo >>> 8) & 0xff, (file.startTempo) & 0xff]);
+                break;
+            case MidiEventType.KEY_SIGNATURE_CHANGE:
+                chunk.writeBytes([0xFF, 0x59, 0x02, Note.shiftToKeySignature(event.shift, event.minor), event.minor ? 1 : 0]);
                 break;
             default:
                 throw new Error(`Unimplemented event ${MidiEventType[(event as any).type]}`);
@@ -145,7 +148,7 @@ function saveFormat1MidiFile(file: MidiFile){
     for (let i = 0, _a = file.tracks; i < _a.length; i++){
         ret.beginChunk('MTrk');
         writeTrackMetaEvents(file, _a[i], i, ret);
-        writeTrackEvents(file, _a[i], i, ret);
+        writeTrackEvents(file, _a[i], ret);
         ret.endChunk();
     }
 

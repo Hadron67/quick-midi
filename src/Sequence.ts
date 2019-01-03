@@ -96,25 +96,26 @@ export class Note {
 }
 
 export enum MidiEventType {
-    NOTEON, NOTEOFF, TEMPO_CHANGE
+    NOTEON, NOTEOFF, TEMPO_CHANGE, KEY_SIGNATURE_CHANGE
 };
 
 export interface MidiEventBase {
     type: MidiEventType;
     delta: number;
-    channel: number;
 };
 
 export interface NoteOnEvent extends MidiEventBase {
     type: MidiEventType.NOTEON;
     note: number;
     velocity: number;
+    channel: number;
 };
 
 export interface NoteOffEvent extends MidiEventBase {
     type: MidiEventType.NOTEOFF;
     note: number;
     velocity: number;
+    channel: number;
 };
 
 export interface TempoChangeEvent extends MidiEventBase {
@@ -122,7 +123,13 @@ export interface TempoChangeEvent extends MidiEventBase {
     tempo: number;
 };
 
-export type MidiEvent = NoteOnEvent | NoteOffEvent | TempoChangeEvent;
+export interface KeySignatureChangeEvent extends MidiEventBase {
+    type: MidiEventType.KEY_SIGNATURE_CHANGE;
+    shift: number;
+    minor: boolean;
+};
+
+export type MidiEvent = NoteOnEvent | NoteOffEvent | TempoChangeEvent | KeySignatureChangeEvent;
 
 export function createNoteOnEvent(note: number, delta: number, channel: number, velocity: number): NoteOnEvent{
     return { type: MidiEventType.NOTEON, delta, note, channel, velocity };
@@ -132,8 +139,12 @@ export function createNoteOffEvent(note: number, delta: number, channel: number,
     return { type: MidiEventType.NOTEOFF, delta, note, channel, velocity };
 }
 
-export function createTempoChangeEvent(tempo: number, delta: number, channel: number): TempoChangeEvent{
-    return { type: MidiEventType.TEMPO_CHANGE, tempo, delta, channel };
+export function createTempoChangeEvent(tempo: number, delta: number): TempoChangeEvent{
+    return { type: MidiEventType.TEMPO_CHANGE, tempo, delta };
+}
+
+export function createKeySignatureChangeEvent(shift: number, minor: boolean, delta: number): KeySignatureChangeEvent{
+    return { type: MidiEventType.KEY_SIGNATURE_CHANGE, shift, minor, delta };
 }
 
 export function eventToString(e: MidiEvent, useNum: boolean = false){
@@ -145,7 +156,9 @@ export function eventToString(e: MidiEvent, useNum: boolean = false){
         case MidiEventType.NOTEOFF:
             return `NoteOff(channel = ${e.channel}, delta = ${e.delta}, note = ${n[Note.getTone(e.note)]}-${Note.getOctave(e.note)}, velocity = ${e.velocity})`;
         case MidiEventType.TEMPO_CHANGE:
-            return `TempoChange(channel = ${e.channel}, delta = ${e.delta}, tempo = ${e.tempo})`;
+            return `TempoChange(delta = ${e.delta}, tempo = ${e.tempo})`;
+        case MidiEventType.KEY_SIGNATURE_CHANGE:
+            return `KeySignatureChange(delta = ${e.delta}, shift = ${e.shift}, minor = ${e.minor})`;
         default:
             throw new Error('unreachable');
     }
@@ -158,7 +171,7 @@ export interface Track {
     events: MidiEvent[];
 };
 
-interface TimeSignature {
+export interface TimeSignature {
     numerator: number;
     denominator: number;
 };

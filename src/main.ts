@@ -19,6 +19,8 @@ export function createContext(): Context{
     let scanner = new Scanner();
     let parser = createParser(eReporter);
 
+    scanner.macroParamChar = '$';
+
     return {
         parse, getErrors
     };
