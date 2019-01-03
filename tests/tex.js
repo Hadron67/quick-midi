@@ -20,6 +20,7 @@ function createContext(){
         s = input;
         i = 0;
         reporter.reset();
+        scanner.reset();
         expander.init(scanner);
         var out = [];
         var t = expander.nextToken();
@@ -30,7 +31,7 @@ function createContext(){
         }
         expanded += t.getText();
         if (reporter.msgs.length){
-            reporter.forEach(msg => out.push(msg.msg));
+            reporter.forEach(msg => out.push(msg.msg + ` (${msg.range.start.line}, ${msg.range.start.column})-(${msg.range.end.line}, ${msg.range.end.column})`));
         }
         else {
             out = [expanded];
@@ -55,14 +56,14 @@ describe("Expanding macros", function(){
         "\\def\\A{\\B, soor} \\def\\B{hkm} \\A", 
         [" {{hkm}, soor}"]
     );
-    testExpand('Endless nested macro', "\\def\\hkm{\\hkm}\\hkm", ["Maximum nested macro expansion exceeded"]);
+    testExpand('Endless nested macro', "\\def\\hkm{\\hkm}\\hkm", ["Maximum nested macro expansion exceeded (1, 10)-(1, 14)"]);
     testExpand('Scoped macro definition (1)', 
         "\\def\\A{1} { \\def\\A{2} \\A } \\A", 
         [" { {2} } {1}"]
     );
     testExpand('Scoped macro definition (2)', 
         "{\\def\\A{123}} \\A", 
-        ["Undefined control sequence \\A"]
+        ["Undefined control sequence \\A (1, 15)-(1, 17)"]
     );
     testExpand('Defining macros with format (1)', 
         "\\def\\plus#1+#2{ #1 plus #2 } \\plus 5 + 6", 
@@ -74,7 +75,7 @@ describe("Expanding macros", function(){
     );
     testExpand('Defining macros with format (3)',
         "\\def\\hkm#1.#2{} \\hkm.{456}",
-        ["Use of macro \\hkm that doesn't match its definition"]    
+        ["Use of macro \\hkm that doesn't match its definition (1, 21)-(1, 22)"]    
     );
     testExpand('Removing comments', "hkm % this will not apear in the output", ["hkm "]);
     testExpand('A problem', '\\def\\repeat#1#2{#1#2#1} \\repeat{1}{2}', [' {{1}{2}{1}}']);

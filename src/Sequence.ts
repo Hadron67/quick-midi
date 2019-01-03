@@ -46,9 +46,8 @@ const majorKeyToSignature = [
 ];
 
 export class Note {
-    duration: number = Note.DEFLEN;
     velocity: number = 0; // not used at present
-    constructor(public note: number){}
+    constructor(public note: number, public duration: number){}
     toString(useNum: boolean = false){
         let note = '';
         const n: string[] = useNum ? toneNum : toneName;
@@ -169,7 +168,7 @@ export function eventToString(e: MidiEvent, useNum: boolean = false){
         case MidiEventType.KEY_SIGNATURE_CHANGE:
             return `KeySignatureChange(delta = ${e.delta}, shift = ${e.shift}, minor = ${e.minor})`;
         case MidiEventType.TIME_SIGNATURE_CHANGE:
-            return `TimeSignatureChange(sig = ${e.sig.numerator} / ${e.sig.denominator})`;
+            return `TimeSignatureChange(delta = ${e.delta}, sig = ${e.sig.numerator} / ${e.sig.denominator})`;
         default:
             throw new Error('unreachable');
     }
@@ -213,5 +212,8 @@ export class MidiFile {
         }
         ret.push('}');
         return ret;
+    }
+    isEmpty(){
+        return this.tracks.length === 0;
     }
 };

@@ -9,7 +9,7 @@ const usage =
 
 Options:
     -o <output file>      Specify output file, default is a.mid;
-    -d                    Dump MIDI file to terminal;
+    -d                    Dump MIDI file (events) to terminal;
     -h, --help            Display this help message and quit.
 `;
 
@@ -78,6 +78,11 @@ function parseArgs(args){
     return opts;
 }
 
+function printErrMsg(lines, msg){
+    console.log(msg.msg);
+
+}
+
 async function main(args){
     var opt = parseArgs(args);
     if (opt.errMsg){
@@ -90,18 +95,24 @@ async function main(args){
         return 0;
     }
     var ctx = qmidi.createContext();
-    var midiFile = ctx.parse(opt.isFile ? await readFile(opt.input, 'utf-8') : opt.input);
+    var input = opt.isFile ? await readFile(opt.input, 'utf-8') : opt.input;
+    var lines = input.split(/\n|\r\n|\r/);
+    var midiFile = ctx.parse(input);
     var errors = ctx.getErrors();
-    if (errors.length > 0){
-        for (var e of errors){
-            console.log(e.msg);
+    if (ctx.hasError()){
+        for (var e of ctx.getPrintedErrors({ getLine: i => lines[i - 1] })){
+            console.log(e);
         }
+        return -1;
     }
     else {
         if (opt.dump){
             for (var line of midiFile.dump(true)){
                 console.log(line);
             }
+        }
+        if (midiFile.isEmpty()){
+            console.log('Warning: creating empty MIDI file.');
         }
         var midiData = qmidi.saveMidiFile(midiFile);
         await writeFile(opt.outFile, Buffer.from(midiData));

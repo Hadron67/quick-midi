@@ -32,6 +32,8 @@ Happy new year
 1
 ```
 
+More examples are in the `examples/` directory.
+
 ### Structure
 The input consists several tracks, each track consists several voices, and the voices are sequences of sound notes. Tracks and 
 voices are indicated by directives, specifying their names.
@@ -46,13 +48,16 @@ voices are indicated by directives, specifying their names.
 
 ...
 ```
-When a track or voice appears for the first time, they'll be created, and when they appear again later in the input, the content
-will be appended to the existing one. This allows one to seperate a track or voices into several parts, making the input more
-readable.
+Directives are started by `\`, as TeX does. When a track or voice appears for the first time, they'll be created, and when they
+appear again later in the input, the content will be appended to the existing one. This allows one to seperate a track or voices 
+into several parts, making the input more readable.
 
-For simplicity, the first track of the input and first voices of a track can appear directly, without `\v` or `\track` directive, 
-in which case their names will be assigned as `Track 1` and `1` respectively. Thus a single sequence input is legal.
+For simplicity, the beginning directives, i.e. `\track` and `\v`, of the first track of the input and first voices of a track can be omitted, in which case their names will be assigned as `Track 1` and `1` respectively. Thus a single sequence input is legal, as the above examples do.
 
 ### Note sequences and modifiers
 Basically, the note sequence consists of sound notes and directives. Each notes could be followed by some modifiers, modifying
-their tone and durations.
+their tone and durations. A **note** is a number 0 to 7, where `0` represents musical rest, 1 to 7 corresponds to musical notes
+in diatonic major scale. As numbered musical notation does, the notation uses a movable Do system, in which case the pitch of the 
+note `1` is **C4** by default, and can be redefined by directives (see below). With no modifiers, all notes are quater notes. 
+
+Modifiers

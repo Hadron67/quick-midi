@@ -38,6 +38,7 @@ class Tester {
     constructor(){
         this.channel = 0;
         this.velocity = 80;
+        this.div = 96;
         this.out = [];
 
         this._indents = 0;
@@ -59,22 +60,24 @@ class Tester {
         this.out.push(`${this._indent()}}`);
     }
     noteOn(noteText, delta){
-        delta = (delta * Note.DEFLEN) | 0;
+        delta = (delta * this.div) | 0;
         this.out.push(`${this._indent()}NoteOn(channel = ${this.channel}, delta = ${delta}, note = ${noteText}, velocity = ${this.velocity})`);
     }
     noteOff(noteText, delta){
-        delta = (delta * Note.DEFLEN) | 0;
+        delta = (delta * this.div) | 0;
         this.out.push(`${this._indent()}NoteOff(channel = ${this.channel}, delta = ${delta}, note = ${noteText}, velocity = ${this.velocity})`);
     }
     tempo(tempo, delta){
-        delta = (delta * Note.DEFLEN) | 0;
+        delta = (delta * this.div) | 0;
         this.out.push(`${this._indent()}TempoChange(delta = ${delta}, tempo = ${tempo})`);
     }
     keySignatureChange(shift, minor, delta){
+        delta = (delta * this.div) | 0;
         this.out.push(`${this._indent()}KeySignatureChange(delta = ${delta}, shift = ${shift}, minor = ${minor})`);
     }
-    timeSignatureChange(n, d){
-        this.out.push(`${this._indent()}TimeSignatureChange(sig = ${n} / ${d})`);
+    timeSignatureChange(n, d, delta){
+        delta = (delta * this.div) | 0;
+        this.out.push(`${this._indent()}TimeSignatureChange(delta = ${delta}, sig = ${n} / ${d})`);
     }
     raw(text){
         this.out.push(this._indent() + text);
@@ -103,8 +106,6 @@ describe('Sequencing with numbered musical notation', function(){
     }
     test('Empty input', '{}  {}#---- {{}{}-}__', t => {
         t.beginFile(0, Note.DEFLEN, deftempo);
-        t.beginTrack('Track 1', 0);
-        t.end();
         t.end();
     });
     test('Basic one-voice sequence', '1231', t => {
@@ -336,7 +337,7 @@ describe('Sequencing with numbered musical notation', function(){
         note(t, '2-4', 1);
         note(t, '3-4', 1);
         note(t, '1-4', 1);
-        t.timeSignatureChange(6, 8);
+        t.timeSignatureChange(6, 8, 0);
         note(t, '1-4', 0.5);
         note(t, '2-4', 0.5);
         note(t, '3-4', 0.5);
@@ -345,6 +346,19 @@ describe('Sequencing with numbered musical notation', function(){
         note(t, '4-4', 0.5);
         note(t, '5-4', 0.5);
         note(t, '3-4', 0.5);
+        
+        t.end();
+        t.end();
+    });
+    test('Change division', '\\div{192} 1231', t => {
+        t.beginFile(0, 192, deftempo);
+        t.beginTrack('Track 1', 0);
+
+        t.div = 192;
+        note(t, '1-4', 1);
+        note(t, '2-4', 1);
+        note(t, '3-4', 1);
+        note(t, '1-4', 1);
         
         t.end();
         t.end();

@@ -352,13 +352,14 @@ export function createParser(eReporter: ErrorReporter): Parser{
         let { tracks, file } = parseTop();
 
         for (let name in tracks){
-            file.tracks.push(convertTrack(tracks[name]));
+            let track = convertTrack(file, tracks[name]);
+            track.events.length > 0 && file.tracks.push(track);
         }
 
         return file;
     }
 
-    function convertTrack(track: NodeTrack): Track {
+    function convertTrack(file: MidiFile, track: NodeTrack): Track {
         let list = new EventNodeList();
         for (let l in track.voices){
             list.appendChild(track.voices[l].events, true);
@@ -367,7 +368,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
             name: track.name, 
             volume: track.volume,
             instrument: track.instrument, 
-            events: pollAllEvents(createOverlappedEventMerger(createNoteQueue(list)))
+            events: pollAllEvents(createOverlappedEventMerger(createNoteQueue(list, file.division)))
         };
     }
 
@@ -411,7 +412,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
         if (n) {
             let tempo = Number(n.text);
             if (tempo > 0xffffff) {
-                eReporter.complationError('Tempo value too large, should be less than 0xffffff', n);
+                eReporter.complationError('Tempo value too large, should be less than 16777215 (0xffffff)', n);
                 return -1;
             }
             else
@@ -428,7 +429,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
         if (regNum.test(n.text)){
             let tempo = 60000000 / Number(n.text);
             if (tempo > 0xffffff) {
-                eReporter.complationError(`Tempo value too large (${tempo}), should be less than 0xffffff`, n);
+                eReporter.complationError(`Tempo value too large (${tempo}), should be less than 16777215 (0xffffff)`, n);
                 return -1;
             }
             else
@@ -494,6 +495,19 @@ export function createParser(eReporter: ErrorReporter): Parser{
                     file.timesig = s;
                 }
             }
+            else if (isMacro(tk, 'div')){
+                next();
+                let t = readNumber();
+                if (t){
+                    let div = Number(t.text);
+                    if (div >= 0x7fff){
+                        eReporter.complationError('Division value too large, should be no more than 32767 (0x7fff)', t);
+                    }
+                    else {
+                        file.division = div;
+                    }
+                }
+            }
             else
                 break;
             tk = peek();
@@ -557,7 +571,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
     }
 
     /**
-     * '{' Sequence ( '|' Sequence )* '}'
+     * '{' Sequence ( ',' Sequence )* '}'
      */
     function parseGroup(): EventNodeList {
         next();
@@ -565,7 +579,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
         let list = parseSequence();
         leaveScope();
         let tk = peek();
-        while (tk.type !== TokenType.EOF && tk.text === '|'){
+        while (tk.type !== TokenType.EOF && tk.text === ','){
             next();
             enterScope();
             list.appendChild(parseSequence());
@@ -581,7 +595,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
     function isSequenceEnd(tk: Token){
         return tk.type === TokenType.EOF || 
         tk.type === TokenType.EGROUP || 
-        tk.type === TokenType.OTHER && tk.text === '|' ||
+        tk.type === TokenType.OTHER && tk.text === ',' ||
         isMacro(tk, 'v') ||
         isMacro(tk, 'track');
     }
@@ -592,19 +606,25 @@ export function createParser(eReporter: ErrorReporter): Parser{
         let tk = peek();
         let list = new EventNodeList();
         while (!isSequenceEnd(tk)){
-            let slot: INodeSlot = null;
-            if (tk.type === TokenType.BGROUP){
-                let group = parseGroup();
-                slot = list.concat(group);
-            }
-            else if (tk.type === TokenType.MACRO){
-                let node = parseDirective();
-                node && list.append(node);
+            if (tk.type === TokenType.OTHER && tk.text === '|'){
+                // ignore bar lines
+                next();
             }
             else {
-                slot = list.append(parseNote(tk));
+                let slot: INodeSlot = null;
+                if (tk.type === TokenType.BGROUP){
+                    let group = parseGroup();
+                    slot = list.concat(group);
+                }
+                else if (tk.type === TokenType.MACRO){
+                    let node = parseDirective();
+                    node && list.append(node);
+                }
+                else {
+                    slot = list.append(parseNote(tk));
+                }
+                parseNoteModifiers(slot);
             }
-            parseNoteModifiers(slot);
             tk = peek();
         }
         return list;
@@ -690,7 +710,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
      */
     function parseNoteModifiers(slot: INodeSlot){
         let tk = peek();
-        while (tk.type === TokenType.OTHER && tk.text !== '|' && modifierToType.hasOwnProperty(tk.text)){
+        while (tk.type === TokenType.OTHER && tk.text !== ',' && modifierToType.hasOwnProperty(tk.text)){
             let type = modifierToType[tk.text];
             if (modifierWithVal.hasOwnProperty(tk.text)){
                 let s = tk.text;
@@ -741,7 +761,7 @@ interface NodeWithEvent {
     event: MidiEvent;
 };
 
-export function createNoteQueue(list: EventNodeList): ISortedNoteEventQueue{
+export function createNoteQueue(list: EventNodeList, division: number): ISortedNoteEventQueue{
     let queue: List<NodeWithEvent> = new List();
     let lastDelta = 0;
 
@@ -752,7 +772,7 @@ export function createNoteQueue(list: EventNodeList): ISortedNoteEventQueue{
     };
 
     function getNoteFromNode(node: NoteEventNode | RestEventNode): Note{
-        let ret = new Note(node.type === EventNodeType.NOTE ? node.note : Note.REST);
+        let ret = new Note(node.type === EventNodeType.NOTE ? node.note : Note.REST, division);
         for (let n = node.parent; n; n = n.parent){
             switch (n.type){
                 case ModifierNodeType.DASH:

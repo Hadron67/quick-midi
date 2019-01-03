@@ -1,7 +1,7 @@
 {
   "name": "quick-midi",
   "version": "1.0.0",
-  "description": "Creating midi files from numbered musical notation (简谱)",
+  "description": "Create MIDI files from numbered musical notation",
   "main": "index.js",
   "bin": "bin/quick-midi",
   "scripts": {
@@ -11,6 +11,7 @@
     "music",
     "sound",
     "midi",
+    "MIDI",
     "generator",
     "parser"
   ],

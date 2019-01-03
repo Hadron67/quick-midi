@@ -64,4 +64,45 @@ interface ITokenSource {
     peekToken(): Token;
 }
 
+export interface SourceLines {
+    getLine(line: number): string;
+};
+
+/*
+         
+         1|
+    ---> 2|
+         3|
+         
+*/
+
+function repeat(s: string, t: number){
+    let r = '';
+    while (t --> 0) r += s;
+    return r;
+}
+
+export function markLines(lines: SourceLines, range: Range, marker: string = '^', space: string = ' '): string[]{
+    let ret: string[] = [];
+    if (range.start.line === range.end.line){
+        ret.push(lines.getLine(range.start.line));
+        let s = repeat(space, range.start.column - 1) + repeat(marker, range.end.column - range.start.column);
+        ret.push(s);
+    }
+    else {
+        let l = lines.getLine(range.start.line);
+        ret.push(l);
+        ret.push(repeat(space, range.start.column - 1) + repeat(marker, l.length - range.start.column));
+        for (let i = range.start.line + 1; i < range.end.line - 1; i++){
+            ret.push(l = lines.getLine(i));
+            ret.push(repeat(marker, l.length));
+        }
+        l = lines.getLine(range.end.line);
+        ret.push(l);
+        ret.push(repeat(marker, range.end.column));
+    }
+    return ret;
+}
+
+
 export { Token, Position, Range, TokenType, ITokenSource }

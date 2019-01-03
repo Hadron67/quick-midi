@@ -7,6 +7,15 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "bin",
+            "program": "${workspaceFolder}/bin/quick-midi",
+            "args": [
+                "r"
+            ]
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "test tex.js",
             "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
             "args": [
