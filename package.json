@@ -18,6 +18,10 @@
     "musical-notation",
     "numbered-musical-notation"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hadron67/quick-midi"
+  },
   "author": "hadroncfy",
   "license": "MIT",
   "devDependencies": {
