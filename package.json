@@ -13,7 +13,10 @@
     "midi",
     "MIDI",
     "generator",
-    "parser"
+    "parser",
+    "notation",
+    "musical-notation",
+    "numbered-musical-notation"
   ],
   "author": "hadroncfy",
   "license": "MIT",

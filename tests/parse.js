@@ -124,7 +124,7 @@ describe('Sequencing with numbered musical notation', function(){
         t.end();
         t.end();
     });
-    test('Simple chorus', '{1|3|5-}23', t => {
+    test('Simple chorus', '{1,3,5-}23', t => {
         t.beginFile(0, Note.DEFLEN, deftempo);
         t.beginTrack('Track 1', 0);
 
@@ -173,7 +173,7 @@ describe('Sequencing with numbered musical notation', function(){
         t.end();
         t.end();
     });
-    test('Rest notes', '{05.13|005-}', t => {
+    test('Rest notes', '{05.13,005-}', t => {
         t.beginFile(0, Note.DEFLEN, deftempo);
         t.beginTrack('Track 1', 0);
         
@@ -189,7 +189,7 @@ describe('Sequencing with numbered musical notation', function(){
         t.end();
         t.end();
     });
-    test('Merge overlapped notes', '333 {1---|0100} {3-|03--}', t => {
+    test('Merge overlapped notes', '333 {1---,0100} {3-,03--}', t => {
         t.beginFile(0, Note.DEFLEN, deftempo);
         t.beginTrack('Track 1', 0);
 
@@ -359,6 +359,17 @@ describe('Sequencing with numbered musical notation', function(){
         note(t, '2-4', 1);
         note(t, '3-4', 1);
         note(t, '1-4', 1);
+        
+        t.end();
+        t.end();
+    });
+    test('3-tuples', '{666}.//', t => {
+        t.beginFile(0, Note.DEFLEN, deftempo);
+        t.beginTrack('Track 1', 0);
+
+        note(t, '6-3', 1 / 3);
+        note(t, '6-3', 1 / 3);
+        note(t, '6-3', 1 / 3);
         
         t.end();
         t.end();

@@ -13,7 +13,7 @@ export interface Parser {
 };
 
 enum ModifierNodeType {
-    VIA, DASH, UNDERLINE, SHARP, FLAT, DOT, POS_OCTAVE, NEG_OCTAVE
+    VIA, DASH, UNDERLINE, SHARP, FLAT, DOT, POS_OCTAVE, NEG_OCTAVE, SLASH
 };
 
 const modifierToType = {
@@ -23,15 +23,17 @@ const modifierToType = {
     'b': ModifierNodeType.FLAT,
     '.': ModifierNodeType.NEG_OCTAVE,
     '\'': ModifierNodeType.POS_OCTAVE,
-    '*': ModifierNodeType.DOT
+    '*': ModifierNodeType.DOT,
+    '/': ModifierNodeType.SLASH
 };
 
 const modifierWithVal = {
     '-': ModifierNodeType.DASH,
-    '*': ModifierNodeType.DOT
+    '*': ModifierNodeType.DOT,
+    '/': ModifierNodeType.SLASH
 };
 
-const modifierNodeTypeToLiteral = ['', '-', '_', '#', 'b', '*', '\'', '.'];
+const modifierNodeTypeToLiteral = ['', '-', '_', '#', 'b', '*', '\'', '.', '/'];
 
 interface ModifierNode {
     pos: Range;
@@ -289,7 +291,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
     function isMacro(tk: Token, name: string){
         return tk.type === TokenType.MACRO && tk.text === '\\' + name;
     }
-    function readArg(){
+    function readArg(): Token{
         let tks = macroExpander.readPossibleGroup(next(), true);
         if (tks[0].type === TokenType.EOF){
             eReporter.complationError('argument expected', tks[0]);
@@ -777,6 +779,9 @@ export function createNoteQueue(list: EventNodeList, division: number): ISortedN
             switch (n.type){
                 case ModifierNodeType.DASH:
                     ret.duration *= n.val + 1;
+                    break;
+                case ModifierNodeType.SLASH:
+                    ret.duration /= n.val + 1;
                     break;
                 case ModifierNodeType.UNDERLINE:
                     ret.duration >>= 1;
