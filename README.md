@@ -1,4 +1,4 @@
-#Quick-midi
+# Quick-midi
 
 [中文README](README_zh_CN.md)
 
@@ -122,8 +122,6 @@ Just as in TeX, you can define macros everywhere in the input with `\def`. But s
 1155665 4433221 \repeat{5544332}
 ```
 The output sequence should be 1155665 4433221 5544332 5544332.
-
-## 
 
 ## License
 MIT.

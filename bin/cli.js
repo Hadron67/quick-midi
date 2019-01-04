@@ -5,7 +5,7 @@ const fs = require('fs');
 
 const usage = 
 `Usage: ${pkg.name} <input> [options]
-    Or  ${pkg.name} -f <input file> [options]
+   Or  ${pkg.name} -f <input file> [options]
 
 Options:
     -o <output file>      Specify output file, default is a.mid;
@@ -32,55 +32,68 @@ function writeFile(fname, data){
 function parseArgs(args){
     var opts = { input: null, isFile: false, outFile: 'a.mid', needHelp: false, errMsg: null, dump: false };
     var outFileSet = false;
-    
-    if (args.length < 1){
-        opts.errMsg = 'Missing input.';
-        return opts;
-    }
-    if (args[0] === '-f'){
-        args.shift();
-        if (args.length < 1){
-            opts.errMsg = 'Missing input file.';
-            return opts;
-        }
-        opts.input = args.shift();
-        opts.isFile = true;
-    }
-    else 
-        opts.input = args.shift();
+
 
     while (args.length){
-        switch (args[0]){
-            case '-h':
-            case '--help':
-                args.shift();
-                opts.needHelp = true;
-                break;
-            case '-o':
-                args.shift();
-                if (args.length < 1){
-                    opts.errMsg = '-o option requires one argument.';
+        if (args[0].charAt(0) === '-'){
+            switch (args[0]){
+                case '-h':
+                case '--help':
+                    args.shift();
+                    opts.needHelp = true;
+                    break;
+                case '-o':
+                    args.shift();
+                    if (args.length < 1){
+                        opts.errMsg = '-o option requires one argument.';
+                        return opts;
+                    }
+                    else if (outFileSet){
+                        opts.errMsg = 'Multiple -o options.';
+                        return opts;
+                    }
+                    else {
+                        opts.outFile = args.shift();
+                    }
+                    break;
+                case '-d':
+                    args.shift();
+                    opts.dump = true;
+                    break;
+                case '-f':
+                    args.shift();
+                    if (args.length < 1){
+                        opts.errMsg = '-f option requires one argument';
+                        return opts;
+                    }
+                    else {
+                        var input;
+                        opts.isFile = true;
+                        if (opts.input !== null){
+                            opts.errMsg = "More than one input present";
+                            return opts;
+                        }
+                        else {
+                            opts.input = args.shift();
+                        }
+                    }
+                    break;
+                default:
+                    opts.errMsg = `Unknown option ${args[0]}`;
                     return opts;
-                }
-                else if (outFileSet){
-                    opts.errMsg = 'Multiple -o options.';
-                    return opts;
-                }
-                else {
-                    opts.outFile = args.shift();
-                }
-                break;
-            case '-d':
-                args.shift();
-                opts.dump = true;
+            }
+        }
+        else {
+            if (opts.input !== null){
+                opts.errMsg = "More than one input present";
+                return opts;
+            }
+            else {
+                opts.input = args.shift();
+            }
         }
     }
     return opts;
-}
-
-function printErrMsg(lines, msg){
-    console.log(msg.msg);
-
 }
 
 async function main(args){
@@ -93,6 +106,11 @@ async function main(args){
     if (opt.needHelp) {
         console.log(usage);
         return 0;
+    }
+    if (opt.input === null){
+        console.log('No input specified.');
+        console.log(`Try ${pkg.name} --help for help.`);
+        return -1;
     }
     var ctx = qmidi.createContext();
     var input = opt.isFile ? await readFile(opt.input, 'utf-8') : opt.input;
@@ -124,7 +142,7 @@ module.exports = function(args){
     main(args)
     .then(e => process.exit(e))
     .catch(e => {
-        console.error(e);
+        console.error(e.toString());
         process.exit(-1);
     });
 }
