@@ -50,16 +50,16 @@ function testExpand(desc, input, expect){
 describe("Expanding macros", function(){
     testExpand('Defining and expanding macros that has no parameter', 
         "\\def\\hkm{soor} \\hkm", 
-        [" {soor}"]
+        [" soor"]
     );
     testExpand('Nested macro expansion', 
         "\\def\\A{\\B, soor} \\def\\B{hkm} \\A", 
-        [" {{hkm}, soor}"]
+        [" hkm, soor"]
     );
-    testExpand('Endless nested macro', "\\def\\hkm{\\hkm}\\hkm", ["Maximum nested macro expansion exceeded (1, 10)-(1, 14)"]);
+    testExpand('Endless nested macro', "\\def\\hkm{\\hkm}\\hkm", ["Maximum nested macro expansion (100) exceeded (1, 10)-(1, 14)"]);
     testExpand('Scoped macro definition (1)', 
         "\\def\\A{1} { \\def\\A{2} \\A } \\A", 
-        [" { {2} } {1}"]
+        [" { 2 } 1"]
     );
     testExpand('Scoped macro definition (2)', 
         "{\\def\\A{123}} \\A", 
@@ -67,16 +67,18 @@ describe("Expanding macros", function(){
     );
     testExpand('Defining macros with format (1)', 
         "\\def\\plus#1+#2{ #1 plus #2 } \\plus 5 + 6", 
-        [" { 5 plus 6 }"]
+        [" 5 plus 6"]
     );
     testExpand('Defining macros with format (2)', 
         "\\def\\formattest.#1.{ Input is #1 } \\formattest .anything but.",
-        [" { Input is anything but }"]
+        [" Input is anything but"]
     );
     testExpand('Defining macros with format (3)',
         "\\def\\hkm#1.#2{} \\hkm.{456}",
         ["Use of macro \\hkm that doesn't match its definition (1, 21)-(1, 22)"]    
     );
     testExpand('Removing comments', "hkm % this will not apear in the output", ["hkm "]);
-    testExpand('A problem', '\\def\\repeat#1#2{#1#2#1} \\repeat{1}{2}', [' {{1}{2}{1}}']);
+    testExpand('A problem', '\\def\\repeat#1#2{#1#2#1#1} \\repeat{1}{2}', [' {1}{2}{1}{1}']);
+    testExpand('Expanding groups', '\\def\\h{{123}} \\h', [' {123}']);
+    testExpand('Whitespaces', '\\def\\hkm#1#2{#1, soor #1, unsoor #2}\\hkm 1 2', ['1, soor 1, unsoor 2']);
 });

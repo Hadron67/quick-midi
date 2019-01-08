@@ -1,6 +1,8 @@
 # Quick-midi
 使用一套基于简谱（想必都熟悉，所以不贴wiki链接了）和TeX的标记语言生成MIDI文件。
 
+[![npm version](https://img.shields.io/npm/v/pnpm.svg)](https://www.npmjs.com/package/quick-midi)
+
 这个想法最初来自一个播放简谱的Mathematica程序，输入的格式很类似，因为简谱很容易转化成ASCII字符串。这个程序是很早以前我的一个同学在一个论坛上发现的，但现在找不到了。在此感谢该程序的作者。
 
 目前输出的MIDI文件为格式1。

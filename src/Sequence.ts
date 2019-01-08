@@ -1,3 +1,6 @@
+import { List } from "./List";
+import { throws } from "assert";
+
 /*
     Number representation of notes:
 
@@ -191,6 +194,80 @@ export interface Metronome {
     n32: number; // while there are `n32' number of 32th notes in 24 MIDI clocks.
 };
 
+export interface MidiEventQueue {
+    poll(): MidiEvent;
+};
+
+export function pollAllEvents(queue: MidiEventQueue): MidiEvent[]{
+    let events: MidiEvent[] = [];
+    let event = queue.poll();
+    while (event){
+        events.push(event);
+        event = queue.poll();
+    }
+    return events;
+}
+
+function copyEvent(e: MidiEvent): MidiEvent {
+    let ret: any = {};
+    for (let p in e){
+        if (p.hasOwnProperty(p)){
+            ret[p] = e[p];
+        }
+    }
+    return ret;
+}
+
+function mergeTracks(tracks: Track[]): MidiEventQueue {
+    interface TrackItem {
+        track: Track;
+        e: MidiEvent;
+        i: number;
+    };
+    let list: List<TrackItem> = new List();
+    let lastDelta = 0;
+    for (let track of tracks){
+        if (track.events.length){
+            list.add({ track, i: 0, e: copyEvent(track.events[0]) });
+        }
+    }
+
+    function poll(): MidiEvent {
+        let first = list.head;
+        if (first){
+            first.data.e.delta -= lastDelta;
+            for (let n = first.next; n; n = n.next){
+                n.data.e.delta -= lastDelta;
+                if (first.data.e.delta > n.data.e.delta){
+                    first = n;
+                }
+            }
+            let d = first.data;
+            let ret = d.e;
+            if (d.i < d.track.events.length){
+                d.e = d.track.events[d.i++];
+            }
+            else {
+                list.remove(first);
+            }
+            lastDelta = ret.delta;
+            return ret;
+        }
+        else
+            return null;
+    }
+
+    return { poll };
+}
+
+interface IMidiInterface {
+    setInstrument(i: number, channel: number): any;
+    noteOn(note: number, velocity: number, channel: number): any;
+    noteOff(note: number, velocity: number, channel: number): any;
+    setTimeout(cb: () => any, ms: number): any;
+    clearTimeout(): any;
+};
+
 export class MidiFile {
     keysig: number = 0; /* [0, 11] */
     timesig: TimeSignature = { numerator: 4, denominator: 4 };
@@ -215,5 +292,61 @@ export class MidiFile {
     }
     isEmpty(){
         return this.tracks.length === 0;
+    }
+};
+
+export class MidiPlayer {
+    private _flattenEvents: MidiEvent[];
+    private _stopped = false;
+    private _ptr = 0;
+    private _tickLen: number;
+    private _it: IMidiInterface;
+    private _donecb: () => any;
+
+    constructor(public file: MidiFile){
+        this._flattenEvents = pollAllEvents(mergeTracks(file.tracks));
+    }
+    private _playOne(e: MidiEvent){
+        switch (e.type){
+            case MidiEventType.NOTEON:
+                this._it.noteOn(e.note, e.velocity, e.channel);
+                break;
+            case MidiEventType.NOTEOFF:
+                this._it.noteOff(e.note, e.velocity, e.channel);
+                break;
+            case MidiEventType.TEMPO_CHANGE:
+                this._tickLen = Math.round(e.tempo / this.file.division);
+                break;
+        }
+    }
+    play(it: IMidiInterface, done: () => any = null){
+        this._tickLen = Math.round(this.file.startTempo / this.file.division);
+        this._ptr = 0;
+        this._donecb = done;
+        for (let i = 0, _a = this.file.tracks; i < _a.length; i++){
+            it.setInstrument(_a[i].instrument, i);
+        }
+        this.resume();
+    }
+    resume(){
+        this._stopped = false;
+        let first = true;
+        let cb = () => {
+            if (first)
+                first = false;
+            else
+                this._playOne(this._flattenEvents[this._ptr++]);
+            while (this._ptr < this._flattenEvents.length && this._flattenEvents[this._ptr].delta === 0){
+                this._playOne(this._flattenEvents[this._ptr++]);
+            }
+            if (this._ptr < this._flattenEvents.length){
+                setTimeout(cb, this._tickLen * this._flattenEvents[this._ptr].delta);
+            }
+            else {
+                this._ptr = 0;
+                this._donecb && this._donecb();
+            }
+        };
+        cb();
     }
 };

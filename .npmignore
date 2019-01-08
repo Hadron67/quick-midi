@@ -5,3 +5,4 @@ examples/**
 
 *.js.map
 *.mid
+*.tgz

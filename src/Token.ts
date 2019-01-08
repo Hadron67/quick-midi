@@ -57,6 +57,13 @@ class Token extends Range {
     isEOF(){
         return this.type === TokenType.EOF;
     }
+    copyWhiteSpace(hasWhiteSpace: boolean){
+        if (hasWhiteSpace !== this.hasWhiteSpace){
+            return new Token(this.type, this.text, this.start, this.end, hasWhiteSpace, this.val);
+        }
+        else 
+            return this;
+    }
 }
 
 interface ITokenSource {

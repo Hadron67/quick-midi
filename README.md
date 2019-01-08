@@ -1,8 +1,11 @@
 # Quick-midi
 
-[中文README](README_zh_CN.md)
 
 Creating MIDI files from a notation based on [numbered musical notation](https://en.wikipedia.org/wiki/Numbered_musical_notation) and TeX.
+
+[![npm version](https://img.shields.io/npm/v/pnpm.svg)](https://www.npmjs.com/package/quick-midi)
+
+[中文README](README_zh_CN.md)
 
 The original idea comes from a Mathematica program that generates and plays a sequence of note from a given input string with a similiar syntax, since numbered musical notation can be expressed easily using ASCII string. One of my friends found it on a BBS a long time ago but I can't find it anymore, so I'd like to credit its author here.
 

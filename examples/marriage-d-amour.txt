@@ -1,7 +1,7 @@
 % par Richard, my favourite
 % USE MONOSPACED FONT TO VIEW THIS FILE !!!
 
-\def\ham$1{$1,$1'}
+\def\ham$1{{$1,$1'}}
 
 \major{Bb}\bpm{73}
 \v{1}          0--      {0--6'}__ | {6'7'7'1''1''7'7'6' 6'3'3'1'1'665'}__ | \times34 {5'4'4'3'4'5'}__4'* |

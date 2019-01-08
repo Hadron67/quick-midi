@@ -3,7 +3,7 @@ import { ErrorReporter } from './ErrorReporter';
 
 interface Macro {
     name: string;
-    isMeta: boolean;
+    isPrimitive: boolean;
     run(e: MacroExpander, token: Token): ITokenSource;
 }
 
@@ -11,7 +11,7 @@ class TeXMacro implements Macro {
     name: string;
     fmt: Token[] = [];
     content: Token[] = null;
-    isMeta = false;
+    isPrimitive = false;
     argCount: number = 0;
     constructor(public nameToken: Token){
         this.name = nameToken.text;
@@ -24,7 +24,7 @@ class TeXMacro implements Macro {
             if (f.type === TokenType.MACRO_PARAM){
                 let selectedParam: Token[];
                 if (i === _a.length - 1 || _a[i + 1].type === TokenType.MACRO_PARAM){
-                    selectedParam = param[f.val] = e.readPossibleGroup(e.nextToken(false), false);
+                    selectedParam = param[f.val] = e.readPossibleGroup(e.nextToken(false), false, true);
                 }
                 else {
                     let next = _a[i + 1];
@@ -32,7 +32,7 @@ class TeXMacro implements Macro {
                     t = e.peekToken(false);
                     if (t.type !== TokenType.EOF && t.text !== next.text) {
                         while(t.type !== TokenType.EOF && t.text !== next.text){
-                            e.readPossibleGroup(e.nextToken(false), false, selectedParam);
+                            e.readPossibleGroup(e.nextToken(false), false, true, selectedParam);
                             t = e.peekToken(false);
                         }
                     }
@@ -58,18 +58,23 @@ class TeXMacro implements Macro {
         for (let tk of this.content){
             if (tk.type === TokenType.MACRO_PARAM){
                 let selected = param[tk.val];
-                if (selected.length >= 1)
-                    selected[0].hasWhiteSpace = tk.hasWhiteSpace;
-                for (let ptk of selected){
-                    ret.push(ptk);
+                // if (selected.length >= 1)
+                //     selected[0].hasWhiteSpace = tk.hasWhiteSpace;
+                // for (let ptk of selected){
+                //     ret.push(ptk);
+                // }
+                for (let i = 0; i < selected.length; i++){
+                    let t = selected[i];
+                    if (i === 0)
+                        t = t.copyWhiteSpace(tk.hasWhiteSpace);
+                    ret.push(t);
                 }
             }
             else
                 ret.push(tk);
         }
-        if (ret.length >= 1){
-            ret[0].hasWhiteSpace = ret[0].hasWhiteSpace || macroToken.hasWhiteSpace;
-        }
+        if (ret.length)
+            ret[0] = ret[0].copyWhiteSpace(macroToken.hasWhiteSpace);
         return new TokenArray(ret);
     }
 }
@@ -108,11 +113,11 @@ class MacroSet {
         return this;
     }
     define(name: string, run: (e: MacroExpander) => ITokenSource, type: MacroType){
-        this.defineMacro({name, run, isMeta: false}, type);
+        this.defineMacro({name, run, isPrimitive: false}, type);
         return this;
     }
-    defineMeta(name: string){
-        this.defineMacro({name, run: null, isMeta: true}, MacroType.INTERNAL);
+    definePrimitive(name: string){
+        this.defineMacro({name, run: null, isPrimitive: true}, MacroType.INTERNAL);
         return this;
     }
     enterScope(){
@@ -151,7 +156,7 @@ class MacroSet {
                 e.eReporter.complationError('"{" expected', t);
                 return null;
             }
-            macro.content = e.readPossibleGroup(t, false);
+            macro.content = e.readPossibleGroup(t, false, false);
             cela.defineMacro(macro, global ? MacroType.GLOBAL : MacroType.SCOPE);
             return null;
         }
@@ -200,7 +205,7 @@ class MacroExpander implements ITokenSource {
         let ts = macro.run(this, tk);
         if (ts !== null){
             if (this.processStack.length >= this.maxNestedMacro){
-                this.eReporter.complationError('Maximum nested macro expansion exceeded', tk);
+                this.eReporter.complationError(`Maximum nested macro expansion (${this.maxNestedMacro}) exceeded`, tk);
                 // ignore this macro and force restart
                 this.processStack.length = 1;
             }
@@ -217,7 +222,7 @@ class MacroExpander implements ITokenSource {
         }
         return t;
     }
-    readPossibleGroup(bg: Token, expand: boolean, array?: Token[]): Token[]{
+    readPossibleGroup(bg: Token, expand: boolean, readBoundary: boolean, array?: Token[]): Token[]{
         let ret: Token[];
         if (array === void 0)
             ret = [bg];
@@ -227,6 +232,7 @@ class MacroExpander implements ITokenSource {
         }
         let level = 1;
         if (bg.type === TokenType.BGROUP){
+            readBoundary || ret.pop();
             while (level > 0){
                 let t = this.nextToken(expand);
                 if (t.type === TokenType.EOF){
@@ -234,9 +240,9 @@ class MacroExpander implements ITokenSource {
                     level = 0;
                 }
                 else {
-                    ret.push(t);
                     t.type === TokenType.BGROUP && level++;
                     t.type === TokenType.EGROUP && level--;
+                    (level > 0 || readBoundary) && ret.push(t);
                 }
             }
         }
@@ -247,7 +253,7 @@ class MacroExpander implements ITokenSource {
             let ret = this._pull();
             if (expand && ret.type === TokenType.MACRO){
                 let macro = this.macros.getMacro(ret.text);
-                if (macro === null || (macro !== null && !macro.isMeta)){
+                if (macro === null || (macro !== null && !macro.isPrimitive)){
                     this._expand(ret, macro);
                     continue;
                 }

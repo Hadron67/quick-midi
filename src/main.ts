@@ -7,8 +7,10 @@ import { markLines, SourceLines } from './Token';
 
 import * as debug from './debug';
 import { MidiFile } from './Sequence';
+
 export { debug };
 export { saveMidiFile } from './io';
+export { MidiPlayer } from './Sequence';
 
 export interface Context {
     parse(input: ISource | string): MidiFile;

@@ -2,7 +2,20 @@
     \c{1} {5.12}_ 233 123255 56771'1' {2321}' 7
     \c{2} 
 */
-import { Note, MidiEventType, MidiEvent, createNoteOnEvent, createNoteOffEvent, createTempoChangeEvent, MidiFile, Track, NoteOnEvent, createKeySignatureChangeEvent, TimeSignature, createTimeSignatureChangeEvent } from "./Sequence";
+import { Note, 
+    MidiEventType, 
+    MidiEvent, 
+    createNoteOnEvent, 
+    createNoteOffEvent, 
+    createTempoChangeEvent, 
+    MidiFile, 
+    Track, 
+    createKeySignatureChangeEvent, 
+    TimeSignature, 
+    createTimeSignatureChangeEvent, 
+    MidiEventQueue,
+    pollAllEvents
+} from "./Sequence";
 import { ITokenSource, TokenType, Token, Range } from "./Token";
 import { MacroExpander } from "./MacroExpaner";
 import { ErrorReporter } from "./ErrorReporter";
@@ -266,16 +279,16 @@ export function createParser(eReporter: ErrorReporter): Parser{
 
     macroExpander.macros
     .defineInternalMacros()
-    .defineMeta('\\tempo')
-    .defineMeta('\\track')
-    .defineMeta('\\v')
-    .defineMeta('\\instrument')
-    .defineMeta('\\bpm')
-    .defineMeta('\\major')
-    .defineMeta('\\minor')
-    .defineMeta('\\vel')
-    .defineMeta('\\times')
-    .defineMeta('\\div');
+    .definePrimitive('\\tempo')
+    .definePrimitive('\\track')
+    .definePrimitive('\\v')
+    .definePrimitive('\\instrument')
+    .definePrimitive('\\bpm')
+    .definePrimitive('\\major')
+    .definePrimitive('\\minor')
+    .definePrimitive('\\vel')
+    .definePrimitive('\\times')
+    .definePrimitive('\\div');
     
     return { 
         parse
@@ -292,21 +305,18 @@ export function createParser(eReporter: ErrorReporter): Parser{
         return tk.type === TokenType.MACRO && tk.text === '\\' + name;
     }
     function readArg(): Token{
-        let tks = macroExpander.readPossibleGroup(next(), true);
-        if (tks[0].type === TokenType.EOF){
+        let tks = macroExpander.readPossibleGroup(next(), true, false);
+        if (tks.length && tks[0].type === TokenType.EOF){
             eReporter.complationError('argument expected', tks[0]);
             tks[0].text = '';
             return tks[0];
         }
-        else if (tks.length === 1){
-            return tks[0];
-        }
         else {
             let text = '';
-            for (let i = 1; i < tks.length - 1; i++){
-                text += tks[i].getText();
+            for (let tk of tks){
+                text += tk.getText();
             }
-            return new Token(TokenType.OTHER, text, tks[1].start, tks[tks.length - 2].end, tks[0].hasWhiteSpace);
+            return new Token(TokenType.OTHER, text, tks[0].start, tks[tks.length - 1].end, tks[0].hasWhiteSpace);
         }
     }
     function readNumber(){
@@ -754,23 +764,19 @@ export function dumpNoteList(list: EventNodeList): string[]{
     return [s];
 }
 
-interface ISortedNoteEventQueue {
-    pollNote(): MidiEvent;
-};
-
 interface NodeWithEvent {
     node: EventNode;
     event: MidiEvent;
 };
 
-export function createNoteQueue(list: EventNodeList, division: number): ISortedNoteEventQueue{
+export function createNoteQueue(list: EventNodeList, division: number): MidiEventQueue{
     let queue: List<NodeWithEvent> = new List();
     let lastDelta = 0;
 
     pushNote(list.head, 0);
 
     return {
-        pollNote
+        poll
     };
 
     function getNoteFromNode(node: NoteEventNode | RestEventNode): Note{
@@ -841,19 +847,22 @@ export function createNoteQueue(list: EventNodeList, division: number): ISortedN
         }
     }
     
-    function pollNote(): MidiEvent {
+    function poll(): MidiEvent {
         let first: ListNode<NodeWithEvent> = queue.head;
         if (first){
+            first.data.event.delta -= lastDelta;
             for (let n = first.next; n; n = n.next){
+                n.data.event.delta -= lastDelta;
                 if (n.data.event.delta < first.data.event.delta){
                     first = n;
                 }
             }
             let ret = first.data;
             queue.remove(first);
-            queue.forEach(n => n.event.delta -= ret.event.delta);
+            // queue.forEach(n => n.event.delta -= ret.event.delta);
+            lastDelta = ret.event.delta;
             if (ret.node){
-                pushNote(ret.node.next, 0);
+                pushNote(ret.node.next, lastDelta);
             }
             return ret.event;
         }
@@ -862,14 +871,14 @@ export function createNoteQueue(list: EventNodeList, division: number): ISortedN
     }
 }
 
-function createMidiEventFilter(queue: ISortedNoteEventQueue, filter: (event: MidiEvent) => boolean): ISortedNoteEventQueue{
+function createMidiEventFilter(queue: MidiEventQueue, filter: (event: MidiEvent) => boolean): MidiEventQueue{
     return {
-        pollNote(){
-            let event = queue.pollNote();
+        poll(){
+            let event = queue.poll();
             let delta = 0;
             while (event && filter(event)){
                 delta += event.delta;
-                event = queue.pollNote();
+                event = queue.poll();
             }
             if (event)
                 event.delta += delta;
@@ -878,7 +887,7 @@ function createMidiEventFilter(queue: ISortedNoteEventQueue, filter: (event: Mid
     };
 }
 
-function createOverlappedEventMerger(queue: ISortedNoteEventQueue): ISortedNoteEventQueue{
+function createOverlappedEventMerger(queue: MidiEventQueue): MidiEventQueue{
     let noteRefCounts: number[] = [];
     for (let i = 0; i < Note.NOTE_COUNT; i++){
         noteRefCounts.push(0);
@@ -895,12 +904,4 @@ function createOverlappedEventMerger(queue: ISortedNoteEventQueue): ISortedNoteE
     });
 }
 
-function pollAllEvents(queue: ISortedNoteEventQueue): MidiEvent[]{
-    let events: MidiEvent[] = [];
-    let event = queue.pollNote();
-    while (event){
-        events.push(event);
-        event = queue.pollNote();
-    }
-    return events;
-}
+
