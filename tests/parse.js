@@ -374,4 +374,14 @@ describe('Sequencing with numbered musical notation', function(){
         t.end();
         t.end();
     });
+    test('Ties', '1~_ 2 | ~-', t => {
+        t.beginFile(0, Note.DEFLEN, deftempo);
+        t.beginTrack('Track 1', 0);
+
+        note(t, '1-4', 1.5);
+        note(t, '2-4', 3);
+        
+        t.end();
+        t.end();
+    });
 });

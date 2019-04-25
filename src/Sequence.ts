@@ -194,6 +194,11 @@ export interface Metronome {
     n32: number; // while there are `n32' number of 32th notes in 24 MIDI clocks.
 };
 
+export interface KeySignature {
+    name: string;
+    shift: number;
+};
+
 export interface MidiEventQueue {
     poll(): MidiEvent;
 };

@@ -111,7 +111,8 @@ C大调卡农片段：
 * `\instrument <乐器编号>`：设置或改变音轨的乐器，可出现在音轨选项和序列中，会产生一个程序（乐器）改变事件。乐器编号和乐器的对应关系可在[MIDI文件说明](http://www.music.mcgill.ca/~ich/classes/mumt306/StandardMIDIfileformat.html)上查得。
 * `\times <分子> <分母>`：设置或改变拍号，可出现在文件选项和序列中。这个命令会产生一个拍号改变的元事件，在需要将输出的MIDI文件导入到其他软件时可能有用，但对播放没有影响。
 * `\div <division的值>`：设置division的值。只能出现在文件选项部分中。
-* `\major <调名>`，`\minor <调名>`：用大调调名或小调调名设置或改变调号，可出现在文件选项和序列中。调名中的`#`和`b`应出现在调名字母的后面。这个命令不仅会产生一个调号改变的元事件，而且会改变该作用域中之后1的音高。
+* `\major <调名>`，`\minor <调名>`：用大调调名或小调调名设置或改变调号，可出现在文件选项和序列中。调名中的`#`和`b`应出现在调名字母的后面。这个命令不仅会产生一个调号改变的元事件，而且会改变该作用域中之后1的音高。有效的调名如下图所示。
+![调名 - Wikipedia](https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/Circle_of_fifths_deluxe_4.svg/400px-Circle_of_fifths_deluxe_4.svg.png)
 * `\vel <力度值>`：设置或改变该作用域中音符被创建时的力度值。
 
 ### 宏

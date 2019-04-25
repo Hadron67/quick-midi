@@ -36,10 +36,30 @@ A fragment of Cannon in C:
 
 Happy new year
 ```
-1
+111-5.-
 ```
 
 More examples are in the `examples/` directory.
+
+## Quick start
+* Sound notes: `6. 7. 1 2 3 4 5 6 7 1'`;
+* Octaves: `1.. 1. 1 1' 1''`;
+* Whole note, half note, quater note, eighth note, 16th note: `1--- 2- 3 4_ 5__`;
+* Half tunes: `1# 3b`;
+* Dotted whole note, dotted half note: `1-----` or `1---*`; `1--` or `1-*`;
+* Dotted quater note, double dotted quater note: `1* 1**`;
+* Grouped notes: `{12}_3 1_2 {71'675}._`, note that `1'.` = `1`;
+* 3-tuples: `{666}.// {111}// {333}// {666}//`;
+* Major key, minor key: `\major{F}`, `\minor{Bb}`;
+* Time signature: `\times34` (for 3/4); `\times{12}{8}` (for 12/8);
+* Set velocity: `\vel{90}`;
+* Set instrument number: `\instrument{2}`;
+* Chords: `{1, 3, 5}` (C major); `{1, 3, 5, 7}` (C major 7); `{6., 1, 3}` (A minor);
+* Multi-voice:
+```
+\v{1} 
+\v{2} 
+```
 
 ### Structure
 The input consists several **tracks**, each track consists several **voices**, and the voices are sequences of sound notes. Tracks and voices are indicated by directives, specifying their names.
@@ -66,14 +86,14 @@ For simplicity, the beginning directives, i.e. `\track` and `\v`, of the first t
 Basically, the note sequence consists of sound notes, groups, and directives. Each notes could be followed by some modifiers modifying their pitches and durations. A **note** is a number 0 to 7, where `0` represents musical rest, 1 to 7 corresponds to musical notes in diatonic major scale. As numbered musical notation does, the notation uses a movable Do system, in which case the pitch of the note `1` is determined by key signature. Key signature is C major by default, that is 1 = C4, and can be redefined by directives (see below). With no modifiers, all notes are quater notes. 
 
 Modifiers come after a note. A `_` halves the notes' duration, n consecutive `-`s extends the notes' length by n times, and n consecutive `*`s extends them by (1 - 1 / 2^n) times. These three modifiers act just as dashes, underscores, and dots in the standard numbered musical notation. In order to express n-tuple, there's one more modifier, `/`, n consecutive `/`s divides the length by (n + 1). If more than one modifiers are present, their total effect on the length of the note is the product of each modifier. Here are some examples:
-* Whole note: 1---
-* Half note: 1-
-* Dotted half note: 1-- or 1-*
-* Quarter note: 1
-* 3-tuple: 1// 2// 3//
-* Dotted quarter note: 1*
-* Eighth note: 1_
-* 16th note: 1__
+* Whole note: `1---`
+* Half note: `1-`
+* Dotted half note: `1--` or `1-*`
+* Quarter note: `1`
+* 3-tuple: `1// 2// 3//`
+* Dotted quarter note: `1*`
+* Eighth note: `1_`
+* 16th note: `1__`
 
 Notes' length are represented by an integer, the ticks. For a quarter note, this value equals to the MIDI file's **division**,which is 96 by default, and can be redefined by `\div` (see below). When a note's length reaches the lower limit 1 or upper limit 0x7fffffff (although this hardly happen), it will be cut off at the limit value. In order to avoid this you should adjust the division value to fit your need.
 
@@ -114,7 +134,8 @@ Directives can appear in the file options section, track options section, and in
 * `\instrument <instrument number>`: Set/change instrument of a track, this can appear in the track options section or in a sequence, and will emit a program (instrument) change event. The map that relates instrument number and instrument can be found at [MIDI file specification](http://www.music.mcgill.ca/~ich/classes/mumt306/StandardMIDIfileformat.html).
 * `\times <numerator> <denominator>`: Set/change time signature, can appear in file options section and sequences. This directive will emit a time signature meta-event, maybe useful when importing the MIDI file to other softwares, but has no effect on playback.
 * `\div <division>`: Set division of quarter note. Can only appear in file options section.
-* `\major <key name>`, `\minor <key name>`: Set/change key signature by specifying major key name or minor key name, can appear in file options section or in the sequences. The sharp or flat symbol should come after the key name. This directive not only emits a key signature meta-event, but also changes the pitch of 1, effects all note that follows the directive in current scope.
+* `\major <key name>`, `\minor <key name>`: Set/change key signature by specifying major key name or minor key name, can appear in file options section or in the sequences. The sharp or flat symbol should come after the key name. This directive not only emits a key signature meta-event, but also changes the pitch of 1, effects all note that follows the directive in current scope. Valid key names are given below:
+![Key signature name - Wikipedia](https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/Circle_of_fifths_deluxe_4.svg/400px-Circle_of_fifths_deluxe_4.svg.png)
 * `\vel <velocity>`: Change velocity value given to each note when they are created in current scope.
 
 ### Macros

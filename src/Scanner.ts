@@ -9,6 +9,12 @@ const regWhiteSpace = /[ \t\r\n]/;
 const regName = /[a-zA-Z]/;
 const regDigit = /[0-9]/;
 
+export enum CatCode {
+    LETTER,
+    MACRO_START,
+    MACRO_PARAM,
+};
+
 class Scanner implements ITokenSource {
     pos: Position = new Position(1, 1);
     _tk: Token = null;

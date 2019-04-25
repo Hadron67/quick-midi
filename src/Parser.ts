@@ -26,10 +26,12 @@ export interface Parser {
 };
 
 enum ModifierNodeType {
-    VIA, DASH, UNDERLINE, SHARP, FLAT, DOT, POS_OCTAVE, NEG_OCTAVE, SLASH
+    VIA, DASH, UNDERLINE, SHARP, FLAT, DOT, POS_OCTAVE, NEG_OCTAVE, SLASH, TIED_NOTE
 };
 
-const modifierToType = {
+type ModifierTypeMap = {[s: string]: ModifierNodeType};
+
+const modifierToType: ModifierTypeMap = {
     '_': ModifierNodeType.UNDERLINE,
     '-': ModifierNodeType.DASH,
     '#': ModifierNodeType.SHARP,
@@ -38,6 +40,12 @@ const modifierToType = {
     '\'': ModifierNodeType.POS_OCTAVE,
     '*': ModifierNodeType.DOT,
     '/': ModifierNodeType.SLASH
+};
+
+const lengthModifierToType: ModifierTypeMap = {
+    '_': ModifierNodeType.UNDERLINE,
+    '-': ModifierNodeType.DASH,
+    '*': ModifierNodeType.DOT
 };
 
 const modifierWithVal = {
@@ -52,7 +60,9 @@ interface ModifierNode {
     pos: Range;
     parent: ModifierNode;
     type: ModifierNodeType;
+
     val?: number;
+    nodes?: ModifierNode[];
 };
 
 enum EventNodeType {
@@ -106,6 +116,10 @@ function createModifierNode(type: ModifierNodeType, pos: Range = null): Modifier
 function createModifierNodeWithVal(type: ModifierNodeType, pos: Range, val: number): ModifierNode{
     return { type, parent: null, pos, val };
 }
+function createTiedNode(pos: Range): ModifierNode{
+    return { type: ModifierNodeType.TIED_NOTE, pos, parent: null, nodes: [] };
+}
+
 function createRestEventNode(pos: Range): RestEventNode{
     return { type: EventNodeType.REST, next: null, sibling: null, parent: null, pos, refCount: 1 };
 }
@@ -470,7 +484,7 @@ export function createParser(eReporter: ErrorReporter): Parser{
         let keyName = readArg();
         if (majorKeyNameToShift.hasOwnProperty(keyName.text)){
             let shift = majorKeyNameToShift[keyName.text];
-            minor && (shift -= 3);
+            minor && (shift += 3);
             return { shift, minor };
         }
         else {
@@ -635,7 +649,8 @@ export function createParser(eReporter: ErrorReporter): Parser{
                 else {
                     slot = list.append(parseNote(tk));
                 }
-                parseNoteModifiers(slot);
+                parseNoteModifiers(slot, modifierToType);
+                parseTieNote(slot);
             }
             tk = peek();
         }
@@ -720,10 +735,10 @@ export function createParser(eReporter: ErrorReporter): Parser{
     /**
      * ( '_' | '-'+ | '#' | 'b' | '.' | '\'' | '\*'+ )*
      */
-    function parseNoteModifiers(slot: INodeSlot){
+    function parseNoteModifiers(slot: INodeSlot, map: ModifierTypeMap){
         let tk = peek();
-        while (tk.type === TokenType.OTHER && tk.text !== ',' && modifierToType.hasOwnProperty(tk.text)){
-            let type = modifierToType[tk.text];
+        while (tk.type === TokenType.OTHER && tk.text !== ',' && map.hasOwnProperty(tk.text)){
+            let type = map[tk.text];
             if (modifierWithVal.hasOwnProperty(tk.text)){
                 let s = tk.text;
                 let start = tk, end = tk;
@@ -739,10 +754,33 @@ export function createParser(eReporter: ErrorReporter): Parser{
                 slot.insertNode(createModifierNodeWithVal(type, Range.between(start, end), num));
             }
             else {
-                slot.insertNode(createModifierNode(modifierToType[tk.text], tk));
+                slot.insertNode(createModifierNode(map[tk.text], tk));
                 next();
                 tk = peek();
             }
+        }
+    }
+
+    function parseTieNote(slot: INodeSlot){
+        parseOptionalBars();
+        let tk = peek();
+        while (tk.text === '~'){
+            let node = createTiedNode(tk);
+            next();
+            parseNoteModifiers({
+                insertNode: n => node.nodes.push(n)
+            }, lengthModifierToType);
+            parseOptionalBars();
+            slot.insertNode(node);
+            tk = peek();
+        }
+    }
+
+    function parseOptionalBars(){
+        let tk = peek();
+        while (tk.text === '|') {
+            next();
+            tk = peek();
         }
     }
 }
@@ -779,10 +817,35 @@ export function createNoteQueue(list: EventNodeList, division: number): MidiEven
         poll
     };
 
+    function getTiedNodeLength(nodes: ModifierNode[]): number{
+        let length = division;
+        for (let n of nodes){
+            switch (n.type){
+                case ModifierNodeType.DASH:
+                    length *= n.val + 1;
+                    break;
+                case ModifierNodeType.SLASH:
+                    length /= n.val + 1;
+                    break;
+                case ModifierNodeType.UNDERLINE:
+                    length >>= 1;
+                    break;
+                case ModifierNodeType.DOT:
+                    let factor = 1 << n.val;
+                    length *= (2 * factor - 1) / factor;
+                    break;
+            }
+        }
+        return length;
+    }
+
     function getNoteFromNode(node: NoteEventNode | RestEventNode): Note{
         let ret = new Note(node.type === EventNodeType.NOTE ? node.note : Note.REST, division);
         for (let n = node.parent; n; n = n.parent){
             switch (n.type){
+                case ModifierNodeType.TIED_NOTE:
+                    ret.duration += getTiedNodeLength(n.nodes);
+                    break;
                 case ModifierNodeType.DASH:
                     ret.duration *= n.val + 1;
                     break;

@@ -58,11 +58,6 @@ class TeXMacro implements Macro {
         for (let tk of this.content){
             if (tk.type === TokenType.MACRO_PARAM){
                 let selected = param[tk.val];
-                // if (selected.length >= 1)
-                //     selected[0].hasWhiteSpace = tk.hasWhiteSpace;
-                // for (let ptk of selected){
-                //     ret.push(ptk);
-                // }
                 for (let i = 0; i < selected.length; i++){
                     let t = selected[i];
                     if (i === 0)
